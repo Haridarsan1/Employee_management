@@ -32,9 +32,9 @@ WHERE name IS NULL OR length(trim(name)) = 0;
 
 -- Fix invalid contact emails
 UPDATE organizations
-SET contact_email = NULL
-WHERE contact_email IS NOT NULL
-  AND contact_email !~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$';
+SET email = NULL
+WHERE email IS NOT NULL
+  AND email !~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$';
 
 -- Now add the data integrity constraints
 ALTER TABLE employees
@@ -45,4 +45,4 @@ ALTER TABLE employees
 
 ALTER TABLE organizations
   ADD CONSTRAINT organizations_name_not_empty CHECK (name IS NOT NULL AND length(trim(name)) > 0),
-  ADD CONSTRAINT organizations_email_format CHECK (contact_email IS NULL OR contact_email = '' OR contact_email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$');
+  ADD CONSTRAINT organizations_email_format CHECK (email IS NULL OR email = '' OR email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$');

@@ -77,3 +77,13 @@ export async function getCurrentOrganizationId(): Promise<string | null> {
     return null;
   }
 }
+
+export async function logPasswordChange(userId: string, organizationId?: string): Promise<void> {
+  await logAuditEvent({
+    action: 'PASSWORD_CHANGED',
+    tableName: 'auth.users',
+    recordId: userId,
+    organizationId,
+    newValues: { password_updated: true }
+  });
+}

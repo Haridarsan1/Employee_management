@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { UserRole } from '../lib/database.types';
 import { getPermissions, type Permissions } from '../lib/permissions';
+import { logPasswordChange } from '../lib/audit';
 
 interface UserProfile {
   id: string;
@@ -39,6 +40,8 @@ interface AuthContextType {
   signUp: (email: string, password: string, organizationName: string) => Promise<void>;
   signOut: () => Promise<void>;
   switchOrganization: (organizationId: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -223,16 +226,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error;
 
-      await loadOrganizationData(organizationId, user.id);
-      setProfile(prev => prev ? { ...prev, current_organization_id: organizationId } : null);
+      await loadUserProfile(user.id);
     } catch (error) {
       console.error('Error switching organization:', error);
       throw error;
     }
   };
 
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw error;
+  };
+
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+
+    // Log the password change for audit purposes
+    if (user) {
+      try {
+        await logPasswordChange(user.id, membership?.organization_id);
+      } catch (auditError) {
+        // Don't fail the password update if audit logging fails
+        console.warn('Password change audit logging failed:', auditError);
+      }
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, profile, organization, membership, permissions, loading, signIn, signUp, signOut, switchOrganization }}>
+    <AuthContext.Provider value={{ user, profile, organization, membership, permissions, loading, signIn, signUp, signOut, switchOrganization, resetPassword, updatePassword }}>
       {children}
     </AuthContext.Provider>
   );

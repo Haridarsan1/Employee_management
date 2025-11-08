@@ -4,9 +4,10 @@ import { User, Lock, AlertCircle, Info } from 'lucide-react';
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
+  onForgotPassword?: () => void;
 }
 
-export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
+export function LoginPage({ onSwitchToRegister, onForgotPassword }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -130,7 +131,7 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
                 <input type="checkbox" className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                 <span className="ml-2 text-sm text-slate-600">Remember me</span>
               </label>
-              <button type="button" className="text-sm text-blue-600 hover:text-blue-700">
+              <button type="button" className="text-sm text-blue-600 hover:text-blue-700" onClick={onForgotPassword}>
                 Forgot password?
               </button>
             </div>

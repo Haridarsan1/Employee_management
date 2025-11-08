@@ -5,6 +5,8 @@ import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './components/Auth/LoginPage';
 import { RegisterPage } from './components/Auth/RegisterPage';
 import { EmployeeRegisterPage } from './components/Auth/EmployeeRegisterPage';
+import { ForgotPasswordPage } from './components/Auth/ForgotPasswordPage';
+import { ResetPasswordPage } from './components/Auth/ResetPasswordPage';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { EmployeesPage } from './pages/Employees/EmployeesPage';
@@ -25,7 +27,7 @@ import { GitHubPage } from './pages/GitHub/GitHubPage';
 function AppContent() {
   const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const [authMode, setAuthMode] = useState<'landing' | 'login' | 'register' | 'employee-register'>('landing');
+  const [authMode, setAuthMode] = useState<'landing' | 'login' | 'register' | 'employee-register' | 'forgot-password' | 'reset-password'>('landing');
 
   useEffect(() => {
     const path = window.location.pathname;
@@ -33,6 +35,8 @@ function AppContent() {
 
     if (path === '/employee-register' || params.get('code')) {
       setAuthMode('employee-register');
+    } else if (path === '/reset-password' || params.get('access_token')) {
+      setAuthMode('reset-password');
     }
   }, []);
 
@@ -49,6 +53,14 @@ function AppContent() {
       return <EmployeeRegisterPage />;
     }
 
+    if (authMode === 'reset-password') {
+      return <ResetPasswordPage />;
+    }
+
+    if (authMode === 'forgot-password') {
+      return <ForgotPasswordPage onBackToLogin={() => setAuthMode('login')} />;
+    }
+
     if (authMode === 'landing') {
       return (
         <LandingPage
@@ -59,7 +71,10 @@ function AppContent() {
     }
 
     return authMode === 'login' ? (
-      <LoginPage onSwitchToRegister={() => setAuthMode('register')} />
+      <LoginPage 
+        onSwitchToRegister={() => setAuthMode('register')} 
+        onForgotPassword={() => setAuthMode('forgot-password')}
+      />
     ) : (
       <RegisterPage onSwitchToLogin={() => setAuthMode('login')} />
     );

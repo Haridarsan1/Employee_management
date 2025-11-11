@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Save, User, Briefcase, Building, DollarSign, FileText, Calendar, Mail, Send, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, Save, User, Briefcase, DollarSign, FileText, Mail, Send, CheckCircle, AlertCircle, Key } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -16,6 +16,10 @@ interface AlertModal {
   title: string;
   message: string;
   invitationLink?: string;
+  credentials?: {
+    email: string;
+    password: string;
+  };
 }
 
 export function AddEmployeeModal({ onClose, onSuccess, departments, designations, branches }: AddEmployeeModalProps) {
@@ -23,7 +27,30 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
   const [loading, setLoading] = useState(false);
   const [currentTab, setCurrentTab] = useState<'personal' | 'employment' | 'salary' | 'documents'>('personal');
   const [alertModal, setAlertModal] = useState<AlertModal | null>(null);
-  const [sendInvitation, setSendInvitation] = useState(true);
+
+  // Generate a secure temporary password
+  const generateTempPassword = () => {
+    const upperChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowerChars = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const specialChars = '!@#$%^&*';
+    
+    // Ensure password has at least one of each required character type
+    let password = '';
+    password += upperChars.charAt(Math.floor(Math.random() * upperChars.length));
+    password += lowerChars.charAt(Math.floor(Math.random() * lowerChars.length));
+    password += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    password += specialChars.charAt(Math.floor(Math.random() * specialChars.length));
+    
+    // Fill remaining characters randomly
+    const allChars = upperChars + lowerChars + numbers + specialChars;
+    for (let i = password.length; i < 12; i++) {
+      password += allChars.charAt(Math.floor(Math.random() * allChars.length));
+    }
+    
+    // Shuffle the password
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+  };
   const [formData, setFormData] = useState({
     first_name: '',
     middle_name: '',
@@ -108,39 +135,66 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
           new_values: formData
         });
 
-      if (sendInvitation) {
-        const { data: inviteData, error: inviteError } = await supabase.rpc('generate_invitation_code');
+      // Generate temporary password and create auth user
+      const tempPassword = generateTempPassword();
 
-        if (inviteError) throw inviteError;
+      // Create Supabase auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.company_email,
+        password: tempPassword,
+        options: {
+          data: {
+            full_name: `${formData.first_name} ${formData.last_name}`
+          }
+        }
+      });
 
-        const invitationCode = inviteData;
+      if (authError) throw authError;
 
-        const { data: user } = await supabase.auth.getUser();
-
-        const { error: insertError } = await supabase
-          .from('employee_invitations')
+      if (authData.user) {
+        // Create organization membership
+        const { error: membershipError } = await supabase
+          .from('organization_members')
           .insert({
             organization_id: organization.id,
+            user_id: authData.user.id,
+            role: 'employee',
             employee_id: employeeData.id,
-            email: formData.company_email,
-            invitation_code: invitationCode,
-            invited_by: user?.user?.id
+            is_active: true
           });
 
-        if (insertError) throw insertError;
+        if (membershipError) throw membershipError;
 
+        // Create user profile
+        const { error: profileError } = await supabase
+          .from('user_profiles')
+          .insert({
+            user_id: authData.user.id,
+            current_organization_id: organization.id,
+            is_active: true
+          });
+
+        if (profileError) throw profileError;
+
+        // Log auth user creation
         await supabase
-          .from('employees')
-          .update({ invitation_sent: true })
-          .eq('id', employeeData.id);
-
-        const invitationLink = `${window.location.origin}/employee-register?code=${invitationCode}`;
+          .from('audit_logs')
+          .insert({
+            organization_id: organization.id,
+            action: 'CREATE',
+            table_name: 'auth.users',
+            record_id: authData.user.id,
+            new_values: { email: formData.company_email, role: 'employee' }
+          });
 
         setAlertModal({
           type: 'success',
           title: 'Employee Added Successfully!',
-          message: `Employee has been created. Share this invitation link with ${formData.first_name}:`,
-          invitationLink: invitationLink
+          message: `Employee ${formData.first_name} ${formData.last_name} has been created with login credentials.`,
+          credentials: {
+            email: formData.company_email,
+            password: tempPassword
+          }
         });
       } else {
         setAlertModal({
@@ -148,10 +202,6 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
           title: 'Employee Added Successfully!',
           message: `Employee ${formData.first_name} ${formData.last_name} has been added to the system.`
         });
-        setTimeout(() => {
-          onSuccess();
-          onClose();
-        }, 2000);
       }
     } catch (error: any) {
       console.error('Error adding employee:', error);
@@ -165,12 +215,13 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
     }
   };
 
-  const copyInvitationLink = () => {
-    if (alertModal?.invitationLink) {
-      navigator.clipboard.writeText(alertModal.invitationLink);
+  const copyCredentials = () => {
+    if (alertModal?.credentials) {
+      const credentialsText = `Email: ${alertModal.credentials.email}\nPassword: ${alertModal.credentials.password}`;
+      navigator.clipboard.writeText(credentialsText);
       setAlertModal({
         ...alertModal,
-        message: 'Invitation link copied to clipboard!'
+        message: 'Login credentials copied to clipboard!'
       });
       setTimeout(() => {
         onSuccess();
@@ -206,7 +257,7 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
                 <button
                   onClick={() => {
                     setAlertModal(null);
-                    if (alertModal.type === 'success' && !alertModal.invitationLink) {
+                    if (alertModal.type === 'success' && !alertModal.invitationLink && !alertModal.credentials) {
                       onSuccess();
                       onClose();
                     }
@@ -219,20 +270,32 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
             </div>
             <div className="p-6">
               <p className="text-slate-700 text-base mb-4">{alertModal.message}</p>
-              {alertModal.invitationLink && (
+              {alertModal.credentials && (
                 <div className="bg-slate-100 rounded-lg p-4 mb-4">
-                  <p className="text-xs text-slate-600 mb-2 font-semibold">Invitation Link:</p>
-                  <p className="text-sm text-slate-900 break-all font-mono">{alertModal.invitationLink}</p>
+                  <p className="text-xs text-slate-600 mb-2 font-semibold">Login Credentials:</p>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-slate-500" />
+                      <span className="text-sm text-slate-900 font-mono">{alertModal.credentials.email}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Key className="h-4 w-4 text-slate-500" />
+                      <span className="text-sm text-slate-900 font-mono">{alertModal.credentials.password}</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-amber-600 mt-2">
+                    ⚠️ Please securely share these credentials with the employee and advise them to change their password after first login.
+                  </p>
                 </div>
               )}
               <div className="flex gap-3">
-                {alertModal.invitationLink ? (
+                {alertModal.credentials ? (
                   <button
-                    onClick={copyInvitationLink}
+                    onClick={copyCredentials}
                     className="flex-1 py-3 rounded-xl font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
                   >
                     <Send className="h-4 w-4" />
-                    Copy Link & Close
+                    Copy Credentials & Close
                   </button>
                 ) : (
                   <button
@@ -839,20 +902,6 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
             >
               Cancel
             </button>
-            {currentTab === 'documents' && (
-              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={sendInvitation}
-                  onChange={(e) => setSendInvitation(e.target.checked)}
-                  className="rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
-                />
-                <span className="flex items-center gap-1">
-                  <Mail className="h-4 w-4" />
-                  Send invitation link to employee
-                </span>
-              </label>
-            )}
           </div>
           <div className="flex gap-3">
             {currentTab !== 'personal' && (

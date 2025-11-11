@@ -7,6 +7,7 @@ import { RegisterPage } from './components/Auth/RegisterPage';
 import { EmployeeRegisterPage } from './components/Auth/EmployeeRegisterPage';
 import { ForgotPasswordPage } from './components/Auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './components/Auth/ResetPasswordPage';
+import { FirstLoginPasswordChange } from './components/Auth/FirstLoginPasswordChange';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { EmployeesPage } from './pages/Employees/EmployeesPage';
@@ -25,7 +26,7 @@ import { AnnouncementsPage } from './pages/Announcements/AnnouncementsPage';
 import { GitHubPage } from './pages/GitHub/GitHubPage';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, requirePasswordChange } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [authMode, setAuthMode] = useState<'landing' | 'login' | 'register' | 'employee-register' | 'forgot-password' | 'reset-password'>('landing');
 
@@ -74,10 +75,16 @@ function AppContent() {
       <LoginPage 
         onSwitchToRegister={() => setAuthMode('register')} 
         onForgotPassword={() => setAuthMode('forgot-password')}
+        onBackToLanding={() => setAuthMode('landing')}
       />
     ) : (
       <RegisterPage onSwitchToLogin={() => setAuthMode('login')} />
     );
+  }
+
+  // If user is logged in but needs to change password (first login for employees)
+  if (requirePasswordChange) {
+    return <FirstLoginPasswordChange />;
   }
 
   const renderPage = () => {

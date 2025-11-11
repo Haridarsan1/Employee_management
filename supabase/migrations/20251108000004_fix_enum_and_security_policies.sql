@@ -253,24 +253,12 @@ CREATE POLICY "audit_logs_insert_policy" ON audit_logs
     )
   );
 
--- Add data integrity constraints
-ALTER TABLE employees
-  ADD CONSTRAINT employees_email_format CHECK (company_email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
-  ADD CONSTRAINT employees_phone_format CHECK (phone ~* '^\+?[1-9]\d{1,14}$' OR phone IS NULL),
-  ADD CONSTRAINT employees_salary_positive CHECK (salary >= 0 OR salary IS NULL),
-  ADD CONSTRAINT employees_joining_date_not_future CHECK (joining_date <= CURRENT_DATE);
-
-ALTER TABLE organizations
-  ADD CONSTRAINT organizations_name_not_empty CHECK (length(trim(name)) > 0),
-  ADD CONSTRAINT organizations_email_format CHECK (contact_email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' OR contact_email IS NULL);
-
 -- Add indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_employees_organization_id ON employees(organization_id);
 CREATE INDEX IF NOT EXISTS idx_employees_company_email ON employees(company_email);
 CREATE INDEX IF NOT EXISTS idx_organization_members_user_id ON organization_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_organization_members_organization_id ON organization_members(organization_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_organization_id ON audit_logs(organization_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_employee_invitations_code ON employee_invitations(invitation_code);
 CREATE INDEX IF NOT EXISTS idx_employee_invitations_expires_at ON employee_invitations(expires_at);
 

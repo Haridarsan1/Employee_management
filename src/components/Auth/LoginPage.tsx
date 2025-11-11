@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, Lock, AlertCircle, Info } from 'lucide-react';
+import { User, Lock, AlertCircle, Info, ArrowLeft } from 'lucide-react';
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
   onForgotPassword?: () => void;
+  onBackToLanding?: () => void;
 }
 
-export function LoginPage({ onSwitchToRegister, onForgotPassword }: LoginPageProps) {
+export function LoginPage({ onSwitchToRegister, onForgotPassword, onBackToLanding }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -34,6 +35,15 @@ export function LoginPage({ onSwitchToRegister, onForgotPassword }: LoginPagePro
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-8 py-10">
+            {onBackToLanding && (
+              <button
+                onClick={onBackToLanding}
+                className="flex items-center gap-2 text-blue-100 hover:text-white mb-4 transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Home
+              </button>
+            )}
             <h2 className="text-3xl font-bold text-white text-center">Welcome Back</h2>
             <p className="text-blue-100 text-center mt-2">Sign in to your HRMS account</p>
           </div>

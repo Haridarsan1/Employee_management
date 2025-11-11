@@ -11,19 +11,54 @@ const admin = createClient(SUPABASE_URL as string, SERVICE_ROLE_KEY as string, {
   auth: { persistSession: false }
 })
 
+// CORS helpers
+const getCorsHeaders = (origin?: string) => {
+  // Allow localhost during development and any origin explicitly provided by Supabase
+  const allowedOrigin =
+    origin && /localhost:5173$/.test(new URL(origin).host)
+      ? origin
+      : '*'
+
+  return {
+    'access-control-allow-origin': allowedOrigin,
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers':
+      'authorization, apikey, content-type, x-client-info, x-supabase-authorization',
+    'access-control-max-age': '86400'
+  }
+}
+
 export default async (req: Request) => {
   try {
+    // Handle preflight
+    if (req.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: getCorsHeaders(req.headers.get('origin') || undefined)
+      })
+    }
+
     if (req.method !== 'POST') {
-      return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 })
+      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+        status: 405,
+        headers: getCorsHeaders(req.headers.get('origin') || undefined)
+      })
     }
 
     const authHeader = req.headers.get('authorization') || ''
     const token = authHeader.replace('Bearer ', '')
-    if (!token) return new Response(JSON.stringify({ error: 'Missing access token' }), { status: 401 })
+    if (!token)
+      return new Response(JSON.stringify({ error: 'Missing access token' }), {
+        status: 401,
+        headers: getCorsHeaders(req.headers.get('origin') || undefined)
+      })
 
     const { data: userData, error: userError } = await admin.auth.getUser(token)
     if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401 })
+      return new Response(JSON.stringify({ error: 'Invalid token' }), {
+        status: 401,
+        headers: getCorsHeaders(req.headers.get('origin') || undefined)
+      })
     }
 
     const user = userData.user
@@ -31,7 +66,10 @@ export default async (req: Request) => {
     const body = await req.json()
     const organizationName = body?.organizationName
     if (!organizationName) {
-      return new Response(JSON.stringify({ error: 'organizationName is required' }), { status: 400 })
+      return new Response(JSON.stringify({ error: 'organizationName is required' }), {
+        status: 400,
+        headers: getCorsHeaders(req.headers.get('origin') || undefined)
+      })
     }
 
     const slug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -51,7 +89,10 @@ export default async (req: Request) => {
       .single()
 
     if (orgError) {
-      return new Response(JSON.stringify({ error: orgError.message }), { status: 500 })
+      return new Response(JSON.stringify({ error: orgError.message }), {
+        status: 500,
+        headers: getCorsHeaders(req.headers.get('origin') || undefined)
+      })
     }
 
     // add organization member
@@ -69,9 +110,15 @@ export default async (req: Request) => {
       is_active: true
     })
 
-    return new Response(JSON.stringify({ organization: orgData }), { status: 200 })
+    return new Response(JSON.stringify({ organization: orgData }), {
+      status: 200,
+      headers: getCorsHeaders(req.headers.get('origin') || undefined)
+    })
   } catch (err: any) {
     console.error('create-org function error', err)
-    return new Response(JSON.stringify({ error: err.message || String(err) }), { status: 500 })
+    return new Response(JSON.stringify({ error: err.message || String(err) }), {
+      status: 500,
+      headers: getCorsHeaders()
+    })
   }
 }

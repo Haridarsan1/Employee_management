@@ -4,6 +4,7 @@ import type { User } from '@supabase/supabase-js';
 import type { UserRole } from '../lib/database.types';
 import { getPermissions, type Permissions } from '../lib/permissions';
 import { logPasswordChange } from '../lib/audit';
+ // import roles from '../lib/roles'; // Commenting out unused import
 
 interface UserProfile {
   id: string;
@@ -55,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<Permissions>(getPermissions(null));
   const [loading, setLoading] = useState(true);
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
+   // const [userRole, setUserRole] = useState<UserRole | null>(null); // Commenting out unused state
 
   useEffect(() => {
     // Listen for auth state changes
@@ -75,6 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Note: Removed a broken useEffect that attempted to manage user roles directly from session
+  // to avoid undefined variables and duplicate logic. Role is derived via membership and permissions.
 
   const loadUserProfile = async (userId: string) => {
     console.log('=== LOADING USER PROFILE ===');
@@ -432,51 +437,98 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const switchOrganization = async (organizationId: string) => {
     if (!user) return;
 
+    setLoading(true);
     try {
-      const { error } = await (supabase as any)
+      // Update user profile with new organization
+      const { error: profileError } = await supabase
         .from('user_profiles')
         .update({ current_organization_id: organizationId })
         .eq('user_id', user.id);
 
-      if (error) throw error;
+      if (profileError) throw profileError;
 
-      await loadUserProfile(user.id);
+      setProfile(prev => prev ? { ...prev, current_organization_id: organizationId } : null);
+
+      // Load new organization data
+      await loadOrganizationData(organizationId, user.id);
     } catch (error) {
       console.error('Error switching organization:', error);
-      throw error;
+    } finally {
+      setLoading(false);
     }
   };
 
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
     if (error) throw error;
   };
 
   const updatePassword = async (password: string) => {
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) throw error;
+    if (!user) return;
+    try {
+      // Update password in Supabase auth
+      const { error: authError } = await supabase.auth.updateUser({ password });
+      if (authError) throw authError;
 
-    // Clear the requirePasswordChange flag
-    setRequirePasswordChange(false);
+      // Log password change event
+      await logPasswordChange(user.id);
 
-    // Log the password change for audit purposes
-    if (user) {
-      try {
-        await logPasswordChange(user.id, membership?.organization_id);
-      } catch (auditError) {
-        // Don't fail the password update if audit logging fails
-        console.warn('Password change audit logging failed:', auditError);
-      }
+      setRequirePasswordChange(false);
+    } catch (error) {
+      console.error('Error updating password:', error);
     }
   };
 
-  return (
-    <AuthContext.Provider value={{ user, profile, organization, membership, permissions, loading, requirePasswordChange, signIn, signUp, signOut, switchOrganization, resetPassword, updatePassword }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  // Refresh user and profile data on mount
+  useEffect(() => {
+    let cancelled = false;
+    const init = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Error getting session:', error);
+        }
+        if (cancelled) return;
+
+        const session = data?.session ?? null;
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+
+        if (currentUser) {
+          await loadUserProfile(currentUser.id);
+        } else {
+          setProfile(null);
+          setOrganization(null);
+          setMembership(null);
+          setPermissions(getPermissions(null));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const value = {
+    user,
+    profile,
+    organization,
+    membership,
+    permissions,
+    loading,
+    requirePasswordChange,
+    signIn,
+    signUp,
+    signOut,
+    switchOrganization,
+    resetPassword,
+    updatePassword
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

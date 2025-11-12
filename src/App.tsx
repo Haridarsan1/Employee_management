@@ -90,7 +90,7 @@ function AppContent() {
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onNavigate={setCurrentPage} />;
       case 'tasks':
         return <TasksPage />;
       case 'employees':
@@ -120,7 +120,7 @@ function AppContent() {
       case 'profile':
         return <EmployeeProfilePage />;
       default:
-        return <Dashboard />;
+        return <Dashboard onNavigate={setCurrentPage} />;
     }
   };
 

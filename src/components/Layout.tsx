@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Menu, X, LogOut, Bell, User, LayoutDashboard, Users, Calendar, Clock, IndianRupee, FileText, Settings, Sparkles, CheckSquare, Receipt, Headphones, Award, BookOpen, Megaphone, Github } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { canAccessPage } from '../lib/permissions';
+import { supabase } from '../lib/supabase';
 
 interface LayoutProps {
   children: ReactNode;
@@ -10,8 +11,59 @@ interface LayoutProps {
 }
 
 export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
-  const { user, organization, membership, permissions, signOut } = useAuth();
+  const { user, organization, membership, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeToday, setActiveToday] = useState(0);
+
+  useEffect(() => {
+    const loadActiveToday = async () => {
+      if (!organization?.id) return;
+      
+      const today = new Date().toISOString().split('T')[0];
+      
+      const { data, error } = await supabase
+        .from('attendance_records')
+        .select('id, employees!inner(organization_id)')
+        .eq('employees.organization_id', organization.id)
+        .eq('attendance_date', today)
+        .eq('status', 'present');
+      
+      if (!error) {
+        const count = data?.length || 0;
+        console.log('Sidebar active today count:', count);
+        setActiveToday(count);
+      } else {
+        console.error('Error loading sidebar active today:', error);
+      }
+    };
+
+    loadActiveToday();
+
+    // Set up real-time subscription for attendance changes
+    if (organization?.id) {
+      const today = new Date().toISOString().split('T')[0];
+      const channel = supabase.channel('sidebar-attendance', {
+        config: { broadcast: { self: true } }
+      });
+
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_records', filter: `attendance_date=eq.${today}` },
+        () => {
+          loadActiveToday();
+        }
+      );
+
+      channel.subscribe((status) => {
+        console.log('Sidebar attendance real-time status:', status);
+      });
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [organization]);
+
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-blue-600', roles: ['admin', 'hr', 'finance', 'manager', 'employee'] },
@@ -123,7 +175,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                   <p className="font-semibold mb-1">Quick Stats</p>
                   <div className="flex items-center justify-between">
                     <span>Active Today</span>
-                    <span className="font-bold">12</span>
+                    <span className="font-bold">{activeToday}</span>
                   </div>
                 </div>
               </div>

@@ -1,21 +1,33 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, Eye, Users, Briefcase, Mail, Phone, Calendar, Sparkles, MoreVertical, Download, Upload } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Mail, Phone, Calendar, Sparkles } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { AddEmployeeModal } from '../../components/Employees/AddEmployeeModal';
 import { EditEmployeeModal } from '../../components/Employees/EditEmployeeModal';
 import { ViewEmployeeModal } from '../../components/Employees/ViewEmployeeModal';
 import { DeleteConfirmModal } from '../../components/Employees/DeleteConfirmModal';
 import { useAuth } from '../../contexts/AuthContext';
-import { hasPermission } from '../../lib/permissions';
-import type { Database } from '../../lib/database.types';
 
-type Employee = Database['public']['Tables']['employees']['Row'] & {
+type Employee = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  employee_code?: string | null;
+  company_email?: string | null;
+  mobile_number?: string | null;
+  employment_status: string;
+  employment_type: string;
+  date_of_joining: string;
+  department_id?: string | null;
+  designation_id?: string | null;
+  branch_id?: string | null;
+  created_at?: string;
+  [key: string]: any;
   departments?: { name: string } | null;
   designations?: { title: string } | null;
 };
 
 export function EmployeesPage() {
-  const { organization, membership, permissions } = useAuth();
+  const { organization, permissions } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [designations, setDesignations] = useState<any[]>([]);
@@ -40,12 +52,14 @@ export function EmployeesPage() {
     if (!organization?.id) return;
 
     try {
+      // Use explicit relationship names to avoid PostgREST PGRST201 ambiguity
+      // employees has department_id -> departments(id) and designation_id -> designations(id)
       let query = supabase
         .from('employees')
         .select(`
           *,
-          departments (name),
-          designations (title)
+          departments:departments!employees_department_id_fkey(name),
+          designations:designations!employees_designation_id_fkey(title)
         `)
         .eq('organization_id', organization.id)
         .order('created_at', { ascending: false });
@@ -157,6 +171,12 @@ export function EmployeesPage() {
 
   return (
     <div className="space-y-6 animate-fadeIn">
+      {(departments.length === 0 || designations.length === 0) && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl">
+          <p className="font-semibold mb-1">Setup needed: Departments and Designations</p>
+          <p className="text-sm">Your organization doesn't have any departments and/or designations yet. Create them from Settings before adding employees, or select them later by editing the employee.</p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent flex items-center gap-3">

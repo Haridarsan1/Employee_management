@@ -105,20 +105,60 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
       return;
     }
 
+    // Enforce required date_of_joining
+    if (!formData.date_of_joining) {
+      setAlertModal({
+        type: 'error',
+        title: 'Missing Date of Joining',
+        message: 'Date of joining is required.'
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
+      // Build payload ensuring optional dates are null, not empty strings
+      const payload: any = {
+        first_name: formData.first_name.trim(),
+        middle_name: formData.middle_name?.trim() || null,
+        last_name: formData.last_name.trim(),
+        date_of_birth: formData.date_of_birth || null,
+        gender: formData.gender,
+        marital_status: formData.marital_status || null,
+        blood_group: formData.blood_group || null,
+        personal_email: formData.personal_email?.trim() || null,
+        company_email: formData.company_email.trim(),
+        mobile_number: formData.mobile_number.trim(),
+        alternate_number: formData.alternate_number?.trim() || null,
+        current_address: formData.current_address || null,
+        permanent_address: formData.permanent_address || null,
+        city: formData.city || null,
+        state: formData.state || null,
+        pincode: formData.pincode || null,
+        department_id: formData.department_id || null,
+        designation_id: formData.designation_id || null,
+        branch_id: formData.branch_id || null,
+        employment_type: formData.employment_type,
+        employment_status: formData.employment_status,
+        date_of_joining: formData.date_of_joining, // required, already validated
+        probation_end_date: formData.probation_end_date || null,
+        pan_number: formData.pan_number || null,
+        aadhaar_number: formData.aadhaar_number || null,
+        uan_number: formData.uan_number || null,
+        esi_number: formData.esi_number || null,
+        bank_name: formData.bank_name || null,
+        bank_account_number: formData.bank_account_number || null,
+        bank_ifsc_code: formData.bank_ifsc_code || null,
+        bank_branch: formData.bank_branch || null,
+        ctc_annual: formData.ctc_annual ? parseFloat(formData.ctc_annual) : null,
+        basic_salary: formData.basic_salary ? parseFloat(formData.basic_salary) : null,
+        organization_id: organization.id
+      };
+
       const { data: employeeData, error: employeeError } = await supabase
         .from('employees')
-        .insert({
-          ...formData,
-          organization_id: organization.id,
-          ctc_annual: formData.ctc_annual ? parseFloat(formData.ctc_annual) : null,
-          basic_salary: formData.basic_salary ? parseFloat(formData.basic_salary) : null,
-          department_id: formData.department_id || null,
-          designation_id: formData.designation_id || null,
-          branch_id: formData.branch_id || null
-        })
+        .insert(payload)
         .select()
         .single();
 

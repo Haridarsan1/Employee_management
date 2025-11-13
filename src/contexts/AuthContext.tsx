@@ -341,9 +341,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Fallback: Create organization directly
       console.log('Using fallback: creating organization directly...');
 
-      // Generate slug and subdomain
-      const slug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-      const subdomain = `${slug}-${Math.random().toString(36).substring(2, 8)}`;
+      // Generate unique slug and subdomain with timestamp and random string
+      const baseSlug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      const timestamp = Date.now().toString(36);
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const slug = `${baseSlug}-${timestamp}-${randomStr}`;
+      const subdomain = `${baseSlug}-${randomStr}`;
 
       console.log('Creating organization with:', { name: organizationName, slug, subdomain, owner_id: userId });
       
@@ -371,13 +374,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log('Organization created:', orgData.id);
 
-      // Create organization membership with admin role
+      // Create organization membership with owner role
       const { error: memberError } = await (supabase as any)
         .from('organization_members')
         .insert({
           organization_id: orgData.id,
           user_id: userId,
-          role: 'owner', // Changed from 'admin' to 'owner' for signup users
+          role: 'owner', // Owner role for signup users
           is_active: true
         });
 

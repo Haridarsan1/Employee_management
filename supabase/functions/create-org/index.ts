@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || Deno.env.get('VITE_SUPABASE_URL')
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -13,11 +13,15 @@ const admin = createClient(SUPABASE_URL as string, SERVICE_ROLE_KEY as string, {
 
 // CORS helpers
 const getCorsHeaders = (origin?: string) => {
-  // Allow localhost during development and any origin explicitly provided by Supabase
-  const allowedOrigin =
-    origin && /localhost:5173$/.test(new URL(origin).host)
-      ? origin
-      : '*'
+  // Allow localhost during development and Vercel production domain
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'https://employeemanagement-lemon.vercel.app'
+  ];
+  
+  const allowedOrigin = origin && allowedOrigins.some(allowed => origin.startsWith(allowed))
+    ? origin
+    : '*';
 
   return {
     'access-control-allow-origin': allowedOrigin,
@@ -72,16 +76,20 @@ export default async (req: Request) => {
       })
     }
 
-    const slug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    const subdomain = `${slug}-${Math.random().toString(36).substring(7)}`
+    // Generate unique slug with timestamp and random string to avoid duplicates
+    const baseSlug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const timestamp = Date.now().toString(36);
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    const slug = `${baseSlug}-${timestamp}-${randomStr}`;
+    const subdomain = `${baseSlug}-${randomStr}`;
 
     // create organization as admin
     const { data: orgData, error: orgError } = await admin
       .from('organizations')
       .insert({
         name: organizationName,
-        slug: subdomain,
-        subdomain,
+        slug: slug,
+        subdomain: subdomain,
         owner_id: user.id,
         trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
       })
@@ -95,11 +103,11 @@ export default async (req: Request) => {
       })
     }
 
-    // add organization member
+    // add organization member with owner role
     await admin.from('organization_members').insert({
       organization_id: orgData.id,
       user_id: user.id,
-      role: 'admin',
+      role: 'owner', // Owner role for signup users
       is_active: true
     })
 

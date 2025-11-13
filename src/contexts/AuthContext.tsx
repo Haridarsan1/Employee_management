@@ -95,15 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // to avoid undefined variables and duplicate logic. Role is derived via membership and permissions.
 
   const loadUserProfile = async (userId: string, currentUser?: User) => {
-    console.log('=== LOADING USER PROFILE ===');
-    console.log('User ID:', userId);
-    console.log('User object exists:', !!currentUser);
-    console.log('User object:', currentUser);
-    console.log('User metadata exists:', !!currentUser?.user_metadata);
-    console.log('User metadata keys:', currentUser?.user_metadata ? Object.keys(currentUser.user_metadata) : 'No metadata');
-    console.log('User metadata organization_name:', currentUser?.user_metadata?.organization_name);
-    console.log('LocalStorage pendingOrganizationName:', localStorage.getItem('pendingOrganizationName'));
-    console.log('=== END USER PROFILE DEBUG ===');
     try {
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
@@ -112,7 +103,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (profileError) throw profileError;
-      console.log('User profile loaded:', profileData);
 
       // Check if user needs to change password (for employees on first login)
       const { data: sessionData } = await supabase.auth.getSession();
@@ -136,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // If no profile exists, this might be a new user after email confirmation
       // Try to get organization name from multiple sources
       if (!profileData) {
-        console.log('No profile found, attempting to create organization for user...');
+        console.log('⚡ Creating org for new user...');
         
         // Check if organization already exists to prevent duplicates
         const { data: existingOrg } = await supabase
@@ -180,7 +170,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (pendingOrg) {
             orgNameFromDB = pendingOrg.organization_name;
-            console.log('Found pending org in database:', orgNameFromDB);
           }
         } catch (dbError) {
           console.error('Error checking pending_organizations:', dbError);
@@ -189,15 +178,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const orgNameFromLocalStorage = localStorage.getItem('pendingOrganizationName');
         const organizationName = orgNameFromDB || orgNameFromMetadata || orgNameFromLocalStorage || 'My Organization';
         
-        console.log('Organization name from metadata:', orgNameFromMetadata);
-        console.log('Organization name from database:', orgNameFromDB);
-        console.log('Organization name from localStorage:', orgNameFromLocalStorage);
-        console.log('Final organization name:', organizationName);
+        console.log('📝 Org name:', organizationName);
         
         // Create organization
         try {
           await createOrganizationForUser(userId, organizationName);
-          console.log('✅ Organization created successfully:', organizationName);
+          console.log('✅ Org created:', organizationName);
           
           // Clean up all sources after successful creation
           if (orgNameFromLocalStorage) {
@@ -227,13 +213,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             throw new Error('Organization created but profile not found');
           }
           
-          console.log('✅ Profile reloaded successfully:', newProfileData);
           setProfile(newProfileData);
           
           if (newProfileData.current_organization_id) {
             await loadOrganizationData(newProfileData.current_organization_id, userId);
-          } else {
-            console.error('Profile has no organization_id!');
           }
           
           return;
@@ -261,7 +244,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const loadOrganizationData = async (organizationId: string, userId: string) => {
-    console.log('Loading organization data for orgId:', organizationId, 'userId:', userId);
     try {
       const { data: orgData, error: orgError } = await supabase
         .from('organizations')
@@ -270,7 +252,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (orgError) throw orgError;
-      console.log('Organization loaded:', orgData);
       setOrganization(orgData);
 
       const { data: memberData, error: memberError } = await supabase
@@ -282,45 +263,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (memberError) throw memberError;
-      console.log('Membership loaded:', memberData);
 
       // If no membership exists but user is the owner, create owner membership
       if (!memberData && orgData && orgData.owner_id === userId) {
-        console.log('User is owner but no membership found, creating owner membership...');
-        const { error: createMemberError } = await (supabase as any)
+        const { error: createMemberError, data: newMemberData } = await (supabase as any)
           .from('organization_members')
           .insert({
             organization_id: organizationId,
             user_id: userId,
             role: 'owner',
             is_active: true
-          });
+          })
+          .select()
+          .single();
 
-        if (createMemberError) {
-          console.error('Failed to create owner membership:', createMemberError);
-        } else {
-          console.log('Owner membership created for owner');
-          // Reload membership
-          const { data: newMemberData, error: newMemberError } = await (supabase as any)
-            .from('organization_members')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .eq('user_id', userId)
-            .eq('is_active', true)
-            .maybeSingle();
-
-          if (!newMemberError && newMemberData) {
-            setMembership(newMemberData);
-            setPermissions(getPermissions(newMemberData.role));
-            console.log('Permissions set for role:', newMemberData.role);
-            return;
-          }
+        if (!createMemberError && newMemberData) {
+          setMembership(newMemberData);
+          setPermissions(getPermissions(newMemberData.role));
+          return;
         }
       }
 
       setMembership(memberData);
       setPermissions(getPermissions(memberData?.role || null));
-      console.log('Permissions set for role:', memberData?.role);
     } catch (error) {
       console.error('Error loading organization:', error);
     }
@@ -398,20 +363,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const createOrganizationForUser = async (userId: string, organizationName: string) => {
-    console.log('🏗️ CREATE ORGANIZATION FUNCTION STARTED');
-    console.log('User ID:', userId);
-    console.log('Organization Name:', organizationName);
+    console.log('🚀 FAST ORG CREATE STARTED');
     
     // Prevent duplicate organization creation
     if (isCreatingOrgRef.current) {
-      console.log('⏭️ Organization creation already in progress, skipping duplicate call');
+      console.log('⏭️ Already creating, skip');
       return;
     }
     
     isCreatingOrgRef.current = true;
     
     try {
-      // Double-check if organization already exists
+      // Quick check if org already exists
       const { data: existingOrg } = await supabase
         .from('organizations')
         .select('id')
@@ -419,65 +382,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
       
       if (existingOrg) {
-        console.log('✅ Organization already exists, skipping creation:', existingOrg.id);
+        console.log('✅ Org exists:', existingOrg.id);
         return;
       }
       
-      // Try to use the Edge Function first (but don't fail if it doesn't work)
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData?.session?.access_token;
-
-        if (accessToken) {
-          const functionsUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-org`;
-
-          const fnRes = await fetch(functionsUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
-              apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string
-            },
-            body: JSON.stringify({ organizationName })
-          });
-
-          if (fnRes.ok) {
-            const fnData = await fnRes.json();
-            const orgData = fnData.organization;
-
-            if (orgData) {
-              console.log('Edge function worked, org created:', orgData.id);
-              // Edge Function worked, continue with subscription setup
-              const starterPlan = await supabase
-                .from('subscription_plans')
-                .select('id')
-                .eq('name', 'Starter')
-                .maybeSingle();
-
-              if (starterPlan.data) {
-                const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-                await supabase
-                  .from('organization_subscriptions')
-                  .insert({
-                    organization_id: orgData.id,
-                    plan_id: starterPlan.data.id,
-                    status: 'trial',
-                    trial_ends_at: trialEnd.toISOString()
-                  });
-              }
-              return; // Success, exit
-            }
-          } else {
-            console.log('Edge function returned non-ok status:', fnRes.status);
-          }
-        }
-      } catch (edgeFunctionError) {
-        console.log('Edge function not available or failed:', edgeFunctionError);
-        // Continue to fallback - don't throw error here
-      }
-
-      // Fallback: Create organization directly
-      console.log('Using fallback: creating organization directly...');
+      // SKIP EDGE FUNCTION - Go directly to database for speed
 
       // Generate unique slug and subdomain with timestamp and random string
       const baseSlug = organizationName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -550,35 +459,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log('User profile created:', profileData);
 
-      // Set up starter subscription
-      const starterPlan = await supabase
-        .from('subscription_plans')
-        .select('id')
-        .eq('name', 'Starter')
-        .maybeSingle();
+      // Set up subscription in background (don't wait) - fire and forget
+      Promise.resolve().then(async () => {
+        try {
+          const { data: starterPlan } = await supabase
+            .from('subscription_plans')
+            .select('id')
+            .eq('name', 'Starter')
+            .maybeSingle();
+          
+          if (starterPlan) {
+            const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+            await supabase
+              .from('organization_subscriptions')
+              .insert({
+                organization_id: orgData.id,
+                plan_id: starterPlan.id,
+                status: 'trial',
+                trial_ends_at: trialEnd.toISOString()
+              });
+          }
+        } catch (err) {
+          console.error('Subscription setup failed (non-critical):', err);
+        }
+      });
 
-      if (starterPlan.data) {
-        const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-        await supabase
-          .from('organization_subscriptions')
-          .insert({
-            organization_id: orgData.id,
-            plan_id: starterPlan.data.id,
-            status: 'trial',
-            trial_ends_at: trialEnd.toISOString()
-          });
-      }
-
-      console.log('Signup process completed successfully');
-      console.log('🏗️ CREATE ORGANIZATION FUNCTION COMPLETED SUCCESSFULLY');
+      console.log('✅ ORG CREATED FAST');
 
     } catch (fallbackError: any) {
-      console.error('❌ ORGANIZATION CREATION FAILED:', fallbackError);
-      console.error('Error name:', fallbackError?.name);
-      console.error('Error message:', fallbackError?.message);
-      console.error('Error code:', fallbackError?.code);
-      console.error('Error details:', fallbackError?.details);
-      console.error('Full error:', JSON.stringify(fallbackError, null, 2));
+      console.error('❌ ORG CREATE FAILED:', fallbackError);
+      console.error('Message:', fallbackError?.message);
+      console.error('Code:', fallbackError?.code);
       throw new Error(`Failed to create organization: ${fallbackError?.message || 'Unknown error'}`);
     } finally {
       isCreatingOrgRef.current = false;

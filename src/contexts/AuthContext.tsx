@@ -210,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               .eq('user_id', userId);
           }
           
-          // Reload profile after creation
+          // Reload profile after creation - MUST succeed
           const { data: newProfileData, error: reloadError } = await supabase
             .from('user_profiles')
             .select('*')
@@ -219,15 +219,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (reloadError) {
             console.error('Error reloading profile after org creation:', reloadError);
-          } else if (newProfileData) {
-            setProfile(newProfileData);
-            if (newProfileData.current_organization_id) {
-              await loadOrganizationData(newProfileData.current_organization_id, userId);
-            }
-            return;
+            throw new Error('Organization created but failed to load profile');
           }
+          
+          if (!newProfileData) {
+            console.error('No profile found after organization creation!');
+            throw new Error('Organization created but profile not found');
+          }
+          
+          console.log('✅ Profile reloaded successfully:', newProfileData);
+          setProfile(newProfileData);
+          
+          if (newProfileData.current_organization_id) {
+            await loadOrganizationData(newProfileData.current_organization_id, userId);
+          } else {
+            console.error('Profile has no organization_id!');
+          }
+          
+          return;
         } catch (createError) {
           console.error('❌ Failed to create organization:', createError);
+          // Don't throw - let it fall through to set loading false
         }
         
         console.log('ℹ️ Organization creation process completed for user:', userId);
@@ -501,36 +513,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Organization created:', orgData.id);
 
       // Create organization membership with owner role
-      const { error: memberError } = await (supabase as any)
+      const { data: memberData, error: memberError } = await (supabase as any)
         .from('organization_members')
         .insert({
           organization_id: orgData.id,
           user_id: userId,
           role: 'owner', // Owner role for signup users
           is_active: true
-        });
+        })
+        .select()
+        .single();
 
       if (memberError) {
         console.error('Membership creation error:', memberError);
+        console.error('Membership error details:', JSON.stringify(memberError, null, 2));
         throw memberError;
       }
 
-      console.log('Membership created with owner role');
+      console.log('Membership created with owner role:', memberData);
 
       // Create user profile
-      const { error: profileError } = await (supabase as any)
+      const { data: profileData, error: profileError } = await (supabase as any)
         .from('user_profiles')
         .insert({
           user_id: userId,
           current_organization_id: orgData.id
-        });
+        })
+        .select()
+        .single();
 
       if (profileError) {
         console.error('Profile creation error:', profileError);
+        console.error('Profile error details:', JSON.stringify(profileError, null, 2));
         throw profileError;
       }
 
-      console.log('User profile created');
+      console.log('User profile created:', profileData);
 
       // Set up starter subscription
       const starterPlan = await supabase
@@ -554,9 +572,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Signup process completed successfully');
       console.log('🏗️ CREATE ORGANIZATION FUNCTION COMPLETED SUCCESSFULLY');
 
-    } catch (fallbackError) {
+    } catch (fallbackError: any) {
       console.error('❌ ORGANIZATION CREATION FAILED:', fallbackError);
-      throw new Error('Failed to create organization. Please try again.');
+      console.error('Error name:', fallbackError?.name);
+      console.error('Error message:', fallbackError?.message);
+      console.error('Error code:', fallbackError?.code);
+      console.error('Error details:', fallbackError?.details);
+      console.error('Full error:', JSON.stringify(fallbackError, null, 2));
+      throw new Error(`Failed to create organization: ${fallbackError?.message || 'Unknown error'}`);
     } finally {
       isCreatingOrgRef.current = false;
     }

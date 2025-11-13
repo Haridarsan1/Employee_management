@@ -11,7 +11,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
-  const { user, organization, membership, signOut } = useAuth();
+  const { user, organization, membership, loading, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeToday, setActiveToday] = useState(0);
 
@@ -167,7 +167,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                   </div>
                   <div>
                     <p className="text-white/80 text-xs font-medium">Welcome Back</p>
-                    <p className="text-white font-bold text-lg">{membership?.role || 'User'}</p>
+                    <p className="text-white font-bold text-lg capitalize">
+                      {membership?.role || (loading ? '...' : 'Loading')}
+                    </p>
                   </div>
                 </div>
                 <div className="h-px bg-white/20 my-3"></div>

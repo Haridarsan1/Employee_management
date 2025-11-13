@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, Lock, AlertCircle, Info, ArrowLeft } from 'lucide-react';
+import { User, Lock, AlertCircle, ArrowLeft } from 'lucide-react';
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
@@ -55,46 +55,6 @@ export function LoginPage({ onSwitchToRegister, onForgotPassword, onBackToLandin
                 <p className="text-sm text-red-800">{error}</p>
               </div>
             )}
-
-            <div className="bg-gradient-to-br from-blue-50 to-violet-50 border-2 border-blue-200 rounded-xl p-4">
-              <div className="flex items-start gap-2 mb-3">
-                <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-blue-900">Testing Employee Access</p>
-                  <p className="text-xs text-blue-700 mt-1">How to see employee features</p>
-                </div>
-              </div>
-
-              <div className="space-y-3 text-sm text-slate-700">
-                <div className="bg-white p-3 rounded-lg border border-blue-200">
-                  <p className="font-semibold text-blue-900 mb-2">📋 Steps to Test Employee View:</p>
-                  <ol className="text-xs space-y-1 list-decimal list-inside text-slate-600">
-                    <li>Login as Admin (your existing account)</li>
-                    <li>Go to "Employees" module</li>
-                    <li>Click "Add Employee"</li>
-                    <li>Fill employee details</li>
-                    <li>System sends invitation link</li>
-                    <li>Use invitation to create employee account</li>
-                    <li>Login with new employee credentials</li>
-                  </ol>
-                </div>
-
-                <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200">
-                  <p className="font-semibold text-emerald-900 mb-1">✨ What Employees Will See:</p>
-                  <p className="text-xs text-emerald-700">
-                    Employees get access to: Dashboard (personal), Profile, Tasks, Attendance,
-                    Leave, Expenses, Performance, Training, Helpdesk, and Announcements.
-                  </p>
-                </div>
-
-                <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
-                  <p className="font-semibold text-amber-900 mb-1">🚫 Hidden from Employees:</p>
-                  <p className="text-xs text-amber-700">
-                    Employees cannot see: Employee Management, Payroll, Reports, or Settings.
-                  </p>
-                </div>
-              </div>
-            </div>
 
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">

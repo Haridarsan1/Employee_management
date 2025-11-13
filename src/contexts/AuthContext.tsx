@@ -57,6 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const isLoadingProfileRef = useRef(false);
+  const lastUserIdRef = useRef<string | null>(null);
+  const isCreatingOrgRef = useRef(false);
    // const [userRole, setUserRole] = useState<UserRole | null>(null); // Commenting out unused state
 
   useEffect(() => {
@@ -65,11 +67,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
-          // Prevent concurrent profile loads
-          if (!isLoadingProfileRef.current) {
+          // Prevent concurrent profile loads AND duplicate loads for same user
+          if (!isLoadingProfileRef.current && lastUserIdRef.current !== session.user.id) {
+            console.log('🔐 Auth state change - loading profile for user:', session.user.id);
             isLoadingProfileRef.current = true;
+            lastUserIdRef.current = session.user.id;
             await loadUserProfile(session.user.id, session.user);
             isLoadingProfileRef.current = false;
+          } else {
+            console.log('⏭️ Skipping duplicate profile load for user:', session.user.id);
           }
         } else {
           setProfile(null);
@@ -77,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setMembership(null);
           setPermissions(getPermissions(null));
           setLoading(false);
+          lastUserIdRef.current = null;
         }
       })();
     });
@@ -368,7 +375,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log('🏗️ CREATE ORGANIZATION FUNCTION STARTED');
     console.log('User ID:', userId);
     console.log('Organization Name:', organizationName);
+    
+    // Prevent duplicate organization creation
+    if (isCreatingOrgRef.current) {
+      console.log('⏭️ Organization creation already in progress, skipping duplicate call');
+      return;
+    }
+    
+    isCreatingOrgRef.current = true;
+    
     try {
+      // Double-check if organization already exists
+      const { data: existingOrg } = await supabase
+        .from('organizations')
+        .select('id')
+        .eq('owner_id', userId)
+        .maybeSingle();
+      
+      if (existingOrg) {
+        console.log('✅ Organization already exists, skipping creation:', existingOrg.id);
+        return;
+      }
+      
       // Try to use the Edge Function first (but don't fail if it doesn't work)
       try {
         const { data: sessionData } = await supabase.auth.getSession();
@@ -515,8 +543,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (fallbackError) {
       console.error('❌ ORGANIZATION CREATION FAILED:', fallbackError);
       throw new Error('Failed to create organization. Please try again.');
+    } finally {
+      isCreatingOrgRef.current = false;
     }
-  };  const signOut = async () => {
+  };
+
+  const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };

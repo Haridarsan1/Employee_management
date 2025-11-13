@@ -28,11 +28,20 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
   const [weeklyAttendance, setWeeklyAttendance] = useState<{ label: string; percentage: number }[]>([]);
   // Attendance modal state for owner (single instance, top-level)
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  
+  // Employee check-in/check-out state
+  const [todayAttendanceRecord, setTodayAttendanceRecord] = useState<any>(null);
+  const [checkInLoading, setCheckInLoading] = useState(false);
 
   useEffect(() => {
     if (!organization?.id) return;
 
     loadDashboardData();
+    
+    // Load employee's attendance record for today if employee role
+    if (membership?.employee_id) {
+      loadTodayAttendance();
+    }
 
     // Set up realtime subscriptions with better event handling
     const channel = supabase.channel('dashboard-updates', {
@@ -103,6 +112,10 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
       (payload) => {
         console.log('Attendance change detected:', payload);
         loadDashboardData();
+        // Reload employee's attendance if they have employee_id
+        if (membership?.employee_id) {
+          loadTodayAttendance();
+        }
       }
     );
 
@@ -187,6 +200,98 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
       console.error('Error loading dashboard:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTodayAttendance = async () => {
+    if (!membership?.employee_id) return;
+    
+    const today = new Date().toISOString().split('T')[0];
+    
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select('*')
+      .eq('employee_id', membership.employee_id)
+      .eq('attendance_date', today)
+      .maybeSingle();
+    
+    if (!error && data) {
+      setTodayAttendanceRecord(data);
+    } else {
+      setTodayAttendanceRecord(null);
+    }
+  };
+
+  const handleCheckIn = async () => {
+    if (!membership?.employee_id || !organization?.id) return;
+    
+    setCheckInLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date().toISOString();
+      
+      const { data, error } = await supabase
+        .from('attendance_records')
+        .insert({
+          employee_id: membership.employee_id,
+          attendance_date: today,
+          status: 'present',
+          check_in_time: now,
+          is_manual_entry: true,
+          marked_by: membership.employee_id
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      setTodayAttendanceRecord(data);
+      console.log('✅ Checked in successfully');
+      
+      // Reload dashboard data to update stats
+      await loadDashboardData();
+    } catch (error) {
+      console.error('❌ Error checking in:', error);
+      alert('Failed to check in. Please try again.');
+    } finally {
+      setCheckInLoading(false);
+    }
+  };
+
+  const handleCheckOut = async () => {
+    if (!todayAttendanceRecord || !membership?.employee_id) return;
+    
+    setCheckInLoading(true);
+    try {
+      const now = new Date().toISOString();
+      
+      // Calculate worked hours
+      const checkInTime = new Date(todayAttendanceRecord.check_in_time);
+      const checkOutTime = new Date(now);
+      const workedHours = ((checkOutTime.getTime() - checkInTime.getTime()) / (1000 * 60 * 60)).toFixed(2);
+      
+      const { data, error } = await supabase
+        .from('attendance_records')
+        .update({
+          check_out_time: now,
+          worked_hours: parseFloat(workedHours)
+        })
+        .eq('id', todayAttendanceRecord.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      setTodayAttendanceRecord(data);
+      console.log('✅ Checked out successfully');
+      
+      // Reload dashboard data to update stats
+      await loadDashboardData();
+    } catch (error) {
+      console.error('❌ Error checking out:', error);
+      alert('Failed to check out. Please try again.');
+    } finally {
+      setCheckInLoading(false);
     }
   };
 
@@ -381,12 +486,69 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
         <div className="bg-white rounded-2xl p-6 border border-slate-100">
           <h3 className="text-lg font-bold text-slate-900 mb-4">Quick Actions</h3>
           <div className="space-y-3">
+            {/* Employee Check-In/Check-Out */}
+            {membership?.employee_id && (
+              <div className="pb-3 border-b border-slate-100">
+                {!todayAttendanceRecord || !todayAttendanceRecord.check_in_time ? (
+                  <button
+                    onClick={handleCheckIn}
+                    disabled={checkInLoading}
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700 transition-all group disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                  >
+                    <div className="bg-white/20 rounded-lg p-2">
+                      <Clock className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <span className="font-semibold block">Check In</span>
+                      <span className="text-xs text-emerald-100">Start your day</span>
+                    </div>
+                  </button>
+                ) : !todayAttendanceRecord.check_out_time ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 p-3 bg-emerald-50 rounded-lg">
+                      <div className="h-2 w-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                      <span className="text-sm font-semibold text-emerald-700">Active Today</span>
+                      <span className="text-xs text-emerald-600 ml-auto">
+                        Since {new Date(todayAttendanceRecord.check_in_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleCheckOut}
+                      disabled={checkInLoading}
+                      className="w-full flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 transition-all group disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                    >
+                      <div className="bg-white/20 rounded-lg p-2">
+                        <Clock className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 text-left">
+                        <span className="font-semibold block">Check Out</span>
+                        <span className="text-xs text-blue-100">End your day</span>
+                      </div>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-50 rounded-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="h-2 w-2 bg-slate-400 rounded-full"></div>
+                      <span className="text-sm font-semibold text-slate-700">Completed for Today</span>
+                    </div>
+                    <div className="text-xs text-slate-600 space-y-1">
+                      <div>Check-in: {new Date(todayAttendanceRecord.check_in_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div>Check-out: {new Date(todayAttendanceRecord.check_out_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="font-semibold text-slate-700">Hours: {todayAttendanceRecord.worked_hours || 0}h</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Regular Quick Actions */}
             {[
-              { label: 'Mark Attendance', icon: Clock, color: 'blue' },
-              { label: 'Apply Leave', icon: Calendar, color: 'emerald' },
-              { label: 'View Payslip', icon: Briefcase, color: 'violet' },
-              { label: 'Submit Expense', icon: TrendingUp, color: 'amber' },
-            ].map((action, idx) => {
+              { label: 'Mark Attendance', icon: Clock, color: 'blue', roles: ['owner', 'admin', 'hr', 'manager'] },
+              { label: 'Apply Leave', icon: Calendar, color: 'emerald', roles: ['owner', 'admin', 'hr', 'finance', 'manager', 'employee'] },
+              { label: 'View Payslip', icon: Briefcase, color: 'violet', roles: ['owner', 'admin', 'hr', 'finance', 'manager', 'employee'] },
+              { label: 'Submit Expense', icon: TrendingUp, color: 'amber', roles: ['owner', 'admin', 'hr', 'finance', 'manager', 'employee'] },
+            ].filter(action => !action.roles || action.roles.includes(membership?.role || '')).map((action, idx) => {
               const Icon = action.icon;
               return (
                 <button

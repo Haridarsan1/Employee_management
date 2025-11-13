@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Calendar, Plus, X, Send, CheckCircle, AlertCircle, Clock, TrendingUp, FileText, Download, Eye, Check, XCircle, Sparkles, Info, AlertTriangle } from 'lucide-react';
+import { Calendar, Plus, X, Send, CheckCircle, AlertCircle, Clock, FileText, Check, XCircle, Sparkles, Info, AlertTriangle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -46,6 +46,7 @@ interface ApplyLeaveForm {
   reason: string;
   half_day: boolean;
   contact_number: string;
+  half_day_period?: 'morning' | 'afternoon' | '';
 }
 
 export function LeavePage() {
@@ -58,13 +59,22 @@ export function LeavePage() {
   const [loading, setLoading] = useState(true);
   const [alertModal, setAlertModal] = useState<AlertModal | null>(null);
   const [selectedLeaveType, setSelectedLeaveType] = useState<LeaveType | null>(null);
+  // Manager/Owner views
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [allRequests, setAllRequests] = useState<any[]>([]);
+  const [deptStats, setDeptStats] = useState({ total: 0, approved: 0, pending: 0 });
+  const [showApproveModal, setShowApproveModal] = useState<{ open: boolean; id: string | null }>({ open: false, id: null });
+  const [approveRemark, setApproveRemark] = useState('');
+  const [policyQuotas, setPolicyQuotas] = useState<Record<string, number>>({});
   const [formData, setFormData] = useState<ApplyLeaveForm>({
     leave_type_id: '',
     from_date: '',
     to_date: '',
     reason: '',
     half_day: false,
-    contact_number: ''
+    contact_number: '',
+    half_day_period: ''
   });
 
   const isManager = membership?.role && ['admin', 'hr', 'manager'].includes(membership.role);
@@ -73,13 +83,44 @@ export function LeavePage() {
     loadLeaveData();
   }, [membership, organization]);
 
+  useEffect(() => {
+    // Realtime updates for leave applications
+    const channel = supabase
+      .channel('realtime-leaves')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_applications' },
+        async () => {
+          try {
+            if (membership?.employee_id) {
+              await Promise.all([loadLeaveApplications(), loadLeaveBalances()]);
+            }
+            if (isManager) {
+              await Promise.all([
+                loadPendingApplications(),
+                loadAllRequests(selectedDepartment),
+              ]);
+            }
+          } catch (e) {
+            console.error('Realtime reload failed:', e);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try { channel.unsubscribe(); } catch {}
+    };
+  }, [membership?.employee_id, isManager, selectedDepartment]);
   const loadLeaveData = async () => {
     try {
       await Promise.all([
         loadLeaveTypes(),
         loadLeaveBalances(),
         loadLeaveApplications(),
-        isManager && loadPendingApplications()
+        isManager && loadPendingApplications(),
+        isManager && loadDepartments(),
+        isManager && loadAllRequests()
       ]);
     } catch (error) {
       console.error('Error loading leave data:', error);
@@ -157,6 +198,64 @@ export function LeavePage() {
     }
   };
 
+  const loadDepartments = async () => {
+    if (!organization?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('departments')
+        .select('id, name')
+        .eq('organization_id', organization.id)
+        .order('name');
+      if (error) throw error;
+      setDepartments(data || []);
+    } catch (error) {
+      console.error('Error loading departments:', error);
+      setDepartments([]);
+    }
+  };
+
+  const loadAllRequests = async (deptId?: string) => {
+    if (!organization?.id) return;
+    try {
+      let query = supabase
+        .from('leave_applications')
+        .select(`
+          *,
+          leave_types (*),
+          employees:employees!inner(
+            id, first_name, last_name, employee_code, department_id,
+            departments:departments!employees_department_id_fkey ( id, name )
+          )
+        `)
+        .eq('employees.organization_id', organization.id)
+        .order('applied_date', { ascending: false });
+
+      const filterDept = typeof deptId === 'string' ? deptId : selectedDepartment;
+      if (filterDept && filterDept !== 'all') {
+        query = query.eq('employees.department_id', filterDept);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setAllRequests(data || []);
+      const total = data?.length || 0;
+      const approved = data?.filter((d: any) => d.status === 'approved').length || 0;
+      const pending = data?.filter((d: any) => d.status === 'pending').length || 0;
+      setDeptStats({ total, approved, pending });
+    } catch (error) {
+      console.error('Error loading all leave requests:', error);
+      setAllRequests([]);
+      setDeptStats({ total: 0, approved: 0, pending: 0 });
+    }
+  };
+
+  useEffect(() => {
+    if (isManager) {
+      loadAllRequests(selectedDepartment);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDepartment]);
+
   const calculateDays = () => {
     if (!formData.from_date || !formData.to_date) return 0;
     const from = new Date(formData.from_date);
@@ -180,6 +279,8 @@ export function LeavePage() {
     today.setHours(0, 0, 0, 0);
     if (from < today) return 'Cannot apply for past dates';
 
+    if (formData.half_day && !formData.half_day_period) return 'Select the half-day period';
+
     const days = calculateDays();
     const balance = leaveBalances.find(b => b.leave_type_id === formData.leave_type_id);
     if (balance && days > balance.available_leaves) {
@@ -187,6 +288,62 @@ export function LeavePage() {
     }
 
     return null;
+  };
+
+  const hasOverlap = async (): Promise<string | null> => {
+    if (!membership?.employee_id) return null;
+    try {
+      const { data, error } = await supabase
+        .from('leave_applications')
+        .select('id, from_date, to_date, status')
+        .eq('employee_id', membership.employee_id)
+        .in('status', ['pending', 'approved'])
+        .lte('from_date', formData.to_date)
+        .gte('to_date', formData.from_date)
+        .limit(1);
+      if (error) throw error;
+      if (data && data.length > 0) {
+        return 'You already have a leave that overlaps with the selected date range.';
+      }
+      return null;
+    } catch (e: any) {
+      console.error('Error checking overlap:', e);
+      return null;
+    }
+  };
+
+  const adjustLeaveBalance = async (employeeId: string, leaveTypeId: string, year: number, deltas: { pending?: number; used?: number }) => {
+    try {
+      const { data: rows, error: selErr } = await supabase
+        .from('leave_balances')
+        .select('id, total_quota, used_leaves, pending_leaves')
+        .eq('employee_id', employeeId)
+        .eq('leave_type_id', leaveTypeId)
+        .eq('year', year)
+        .limit(1);
+      if (selErr) throw selErr;
+
+      if (!rows || rows.length === 0) {
+        const { error: insErr } = await supabase
+          .from('leave_balances')
+          .insert({ employee_id: employeeId, leave_type_id: leaveTypeId, year, total_quota: 0, used_leaves: deltas.used || 0, pending_leaves: deltas.pending || 0 });
+        if (insErr) throw insErr;
+      } else {
+        const current = rows[0];
+        const payload: any = {};
+        if (typeof deltas.pending === 'number') payload.pending_leaves = Number(current.pending_leaves || 0) + deltas.pending;
+        if (typeof deltas.used === 'number') payload.used_leaves = Number(current.used_leaves || 0) + deltas.used;
+        if (Object.keys(payload).length > 0) {
+          const { error: updErr } = await supabase
+            .from('leave_balances')
+            .update(payload)
+            .eq('id', current.id);
+          if (updErr) throw updErr;
+        }
+      }
+    } catch (e) {
+      console.error('Error adjusting leave balance:', e);
+    }
   };
 
   const handleApplyLeave = async () => {
@@ -203,6 +360,12 @@ export function LeavePage() {
     if (!membership?.employee_id) return;
 
     try {
+      const overlapError = await hasOverlap();
+      if (overlapError) {
+        setAlertModal({ type: 'error', title: 'Overlap Detected', message: overlapError });
+        return;
+      }
+
       const days = calculateDays();
 
       const { error: insertError } = await supabase
@@ -216,11 +379,16 @@ export function LeavePage() {
           reason: formData.reason,
           contact_number: formData.contact_number || null,
           is_half_day: formData.half_day,
+          half_day_period: formData.half_day ? (formData.half_day_period || null) : null,
           status: 'pending',
           applied_date: new Date().toISOString()
         });
 
       if (insertError) throw insertError;
+
+      // Increase pending balance
+      const year = new Date(formData.from_date).getFullYear();
+      await adjustLeaveBalance(membership.employee_id, formData.leave_type_id, year, { pending: Number(days) });
 
       setAlertModal({
         type: 'success',
@@ -235,11 +403,12 @@ export function LeavePage() {
         to_date: '',
         reason: '',
         half_day: false,
-        contact_number: ''
+        contact_number: '',
+        half_day_period: ''
       });
       setSelectedLeaveType(null);
 
-      await loadLeaveApplications();
+      await Promise.all([loadLeaveApplications(), loadLeaveBalances()]);
     } catch (error: any) {
       console.error('Error applying leave:', error);
       setAlertModal({
@@ -250,20 +419,40 @@ export function LeavePage() {
     }
   };
 
-  const handleApprove = async (applicationId: string) => {
-    if (!membership?.user_id) return;
+  // Approval handled via modal with optional remark
+
+  const handleApproveWithRemark = async () => {
+    if (!membership?.user_id || !showApproveModal.id) return;
 
     try {
+      // fetch application to know totals
+      const { data: apps, error: appErr } = await supabase
+        .from('leave_applications')
+        .select('id, employee_id, leave_type_id, total_days, from_date')
+        .eq('id', showApproveModal.id)
+        .limit(1);
+      if (appErr) throw appErr;
+
+      const update: any = {
+        status: 'approved',
+        approved_by: membership.user_id,
+        approved_date: new Date().toISOString(),
+      };
+      if (approveRemark.trim()) update.remarks = approveRemark.trim();
+
       const { error } = await supabase
         .from('leave_applications')
-        .update({
-          status: 'approved',
-          approved_by: membership.user_id,
-          approved_date: new Date().toISOString()
-        })
-        .eq('id', applicationId);
+        .update(update)
+        .eq('id', showApproveModal.id);
 
       if (error) throw error;
+
+      // adjust balances: -pending, +used
+      const app = apps && apps[0];
+      if (app) {
+        const year = new Date(app.from_date).getFullYear();
+        await adjustLeaveBalance(app.employee_id, app.leave_type_id, year, { pending: -Number(app.total_days), used: Number(app.total_days) });
+      }
 
       setAlertModal({
         type: 'success',
@@ -271,10 +460,15 @@ export function LeavePage() {
         message: 'Leave application has been approved successfully.'
       });
 
-      await loadPendingApplications();
-      await loadLeaveApplications();
+      setShowApproveModal({ open: false, id: null });
+      setApproveRemark('');
+      await Promise.all([
+        loadPendingApplications(),
+        loadLeaveApplications(),
+        loadAllRequests()
+      ]);
     } catch (error: any) {
-      console.error('Error approving leave:', error);
+      console.error('Error approving leave with remark:', error);
       setAlertModal({
         type: 'error',
         title: 'Approval Failed',
@@ -287,6 +481,14 @@ export function LeavePage() {
     if (!membership?.user_id) return;
 
     try {
+      // fetch app
+      const { data: apps, error: appErr } = await supabase
+        .from('leave_applications')
+        .select('id, employee_id, leave_type_id, total_days, from_date')
+        .eq('id', applicationId)
+        .limit(1);
+      if (appErr) throw appErr;
+
       const { error } = await supabase
         .from('leave_applications')
         .update({
@@ -299,6 +501,13 @@ export function LeavePage() {
 
       if (error) throw error;
 
+      // decrement pending
+      const app = apps && apps[0];
+      if (app) {
+        const year = new Date(app.from_date).getFullYear();
+        await adjustLeaveBalance(app.employee_id, app.leave_type_id, year, { pending: -Number(app.total_days) });
+      }
+
       setAlertModal({
         type: 'success',
         title: 'Leave Rejected',
@@ -307,6 +516,7 @@ export function LeavePage() {
 
       await loadPendingApplications();
       await loadLeaveApplications();
+      await loadAllRequests();
     } catch (error: any) {
       console.error('Error rejecting leave:', error);
       setAlertModal({
@@ -317,40 +527,107 @@ export function LeavePage() {
     }
   };
 
+  const handleCancel = async (applicationId: string) => {
+    // Employee can cancel only pending applications
+    try {
+      const { data: apps, error: appErr } = await supabase
+        .from('leave_applications')
+        .select('id, employee_id, leave_type_id, total_days, from_date, status')
+        .eq('id', applicationId)
+        .eq('employee_id', membership?.employee_id || '')
+        .limit(1);
+      if (appErr) throw appErr;
+
+      const { error } = await supabase
+        .from('leave_applications')
+        .update({ status: 'cancelled' })
+        .eq('id', applicationId)
+        .eq('status', 'pending')
+        .eq('employee_id', membership?.employee_id || '');
+
+      if (error) throw error;
+
+      const app = apps && apps[0];
+      if (app && app.status === 'pending') {
+        const year = new Date(app.from_date).getFullYear();
+        await adjustLeaveBalance(app.employee_id, app.leave_type_id, year, { pending: -Number(app.total_days) });
+      }
+
+      setAlertModal({
+        type: 'success',
+        title: 'Leave Cancelled',
+        message: 'Your leave request has been cancelled.'
+      });
+
+      await Promise.all([loadLeaveApplications(), loadLeaveBalances()]);
+    } catch (error: any) {
+      console.error('Error cancelling leave:', error);
+      setAlertModal({
+        type: 'error',
+        title: 'Cancellation Failed',
+        message: error.message || 'Failed to cancel leave'
+      });
+    }
+  };
+
   const handleLeaveTypeChange = (leaveTypeId: string) => {
     setFormData({ ...formData, leave_type_id: leaveTypeId });
     const type = leaveTypes.find(t => t.id === leaveTypeId);
     setSelectedLeaveType(type || null);
   };
 
-  const getColorClasses = (color: string) => {
-    const colors: { [key: string]: string } = {
-      blue: 'from-blue-500 to-blue-600',
-      red: 'from-red-500 to-red-600',
-      green: 'from-emerald-500 to-emerald-600',
-      purple: 'from-violet-500 to-violet-600',
-      yellow: 'from-amber-500 to-amber-600',
-      orange: 'from-orange-500 to-orange-600',
-    };
-    return colors[color] || colors.blue;
+  const handleApplyQuotas = async () => {
+    if (!organization?.id) return;
+    try {
+      // collect quotas
+      const entries = Object.entries(policyQuotas).filter(([_, v]) => !isNaN(Number(v)) && Number(v) >= 0);
+      if (entries.length === 0) {
+        setAlertModal({ type: 'warning', title: 'No Quotas Set', message: 'Please enter at least one quota value to apply.' });
+        return;
+      }
+
+      // fetch employees in org
+      const { data: employees, error: empErr } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('status', 'active');
+      if (empErr) throw empErr;
+
+      const employeeIds = (employees || []).map((e: any) => e.id);
+      if (employeeIds.length === 0) {
+        setAlertModal({ type: 'info', title: 'No Employees', message: 'No active employees found to apply quotas.' });
+        return;
+      }
+
+      const year = new Date().getFullYear();
+      // build rows for upsert
+      const rows: any[] = [];
+      for (const [typeId, quota] of entries) {
+        for (const empId of employeeIds) {
+          rows.push({ employee_id: empId, leave_type_id: typeId, year, total_quota: Number(quota) });
+        }
+      }
+
+      // upsert in chunks to avoid payload limits
+      const chunkSize = 500;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize);
+        const { error } = await supabase
+          .from('leave_balances')
+          .upsert(chunk, { onConflict: 'employee_id,leave_type_id,year' });
+        if (error) throw error;
+      }
+
+      setAlertModal({ type: 'success', title: 'Quotas Applied', message: 'Leave quotas have been applied to all active employees for the current year.' });
+      await loadLeaveBalances();
+    } catch (error: any) {
+      console.error('Error applying quotas:', error);
+      setAlertModal({ type: 'error', title: 'Failed to Apply Quotas', message: error.message || 'An error occurred while applying leave quotas.' });
+    }
   };
 
-  const getStatusBadge = (status: string) => {
-    const badges: { [key: string]: { color: string; icon: any } } = {
-      pending: { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
-      approved: { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle },
-      rejected: { color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
-    };
-    const badge = badges[status] || badges.pending;
-    const Icon = badge.icon;
-
-    return (
-      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border-2 ${badge.color}`}>
-        <Icon className="h-3 w-3" />
-        {status.toUpperCase()}
-      </span>
-    );
-  };
+  // helper functions moved to card components
 
   if (loading) {
     return (
@@ -402,6 +679,45 @@ export function LeavePage() {
                 }`}>
                 OK
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApproveModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-scaleIn">
+            <div className="p-6 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-t-2xl">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white">Approve Leave</h3>
+                <button onClick={() => setShowApproveModal({ open: false, id: null })} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                  <X className="h-5 w-5 text-white" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-700">Optionally add a note for the employee:</p>
+              <textarea
+                value={approveRemark}
+                onChange={(e) => setApproveRemark(e.target.value)}
+                rows={4}
+                placeholder="Remark (optional)"
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowApproveModal({ open: false, id: null })}
+                  className="flex-1 py-3 border-2 border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApproveWithRemark}
+                  className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-emerald-800"
+                >
+                  Approve
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -501,6 +817,20 @@ export function LeavePage() {
                   />
                   <span className="text-sm font-semibold text-slate-700">Half Day Leave</span>
                 </label>
+                {formData.half_day && (
+                  <div className="mt-3">
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Half-day period</label>
+                    <select
+                      value={formData.half_day_period || ''}
+                      onChange={(e) => setFormData({ ...formData, half_day_period: (e.target.value as any) })}
+                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                    >
+                      <option value="">Select period</option>
+                      <option value="morning">Morning</option>
+                      <option value="afternoon">Afternoon</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -604,11 +934,112 @@ export function LeavePage() {
                 <PendingApplicationCard
                   key={app.id}
                   application={app}
-                  onApprove={handleApprove}
+                  onApprove={(id) => setShowApproveModal({ open: true, id })}
                   onReject={handleReject}
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {isManager && (
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+                  <FileText className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">All Leave Requests</h2>
+                  <p className="text-sm text-slate-600">Organization-wide leave applications</p>
+                </div>
+              </div>
+              <div>
+                <select
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                  className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="all">All Departments</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <StatCard label="Total" value={deptStats.total} color="blue" />
+              <StatCard label="Approved" value={deptStats.approved} color="emerald" />
+              <StatCard label="Pending" value={deptStats.pending} color="amber" />
+            </div>
+
+            {allRequests.length === 0 ? (
+              <div className="text-center py-12">
+                <Calendar className="h-16 w-16 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-600 font-semibold">No requests found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="text-left text-sm text-slate-500 border-b">
+                      <th className="py-3 px-4">Employee</th>
+                      <th className="py-3 px-4">Department</th>
+                      <th className="py-3 px-4">Type</th>
+                      <th className="py-3 px-4">From</th>
+                      <th className="py-3 px-4">To</th>
+                      <th className="py-3 px-4">Days</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allRequests.slice(0, 50).map((r: any) => (
+                      <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="font-semibold text-slate-900">{r.employees.first_name} {r.employees.last_name}</p>
+                            <p className="text-xs text-slate-500">{r.employees.employee_code}</p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-slate-700">{r.employees.departments?.name || '—'}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">{r.leave_types?.code}</span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-700">{new Date(r.from_date).toLocaleDateString()}</td>
+                        <td className="py-3 px-4 text-slate-700">{new Date(r.to_date).toLocaleDateString()}</td>
+                        <td className="py-3 px-4 text-slate-700">{r.total_days}</td>
+                        <td className="py-3 px-4">
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${r.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : r.status === 'rejected' ? 'bg-red-100 text-red-700' : r.status === 'cancelled' ? 'bg-slate-100 text-slate-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {r.status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {r.status === 'pending' ? (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setShowApproveModal({ open: true, id: r.id })}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold"
+                              >Approve</button>
+                              <button
+                                onClick={() => {
+                                  const reason = window.prompt('Reason for rejection?');
+                                  if (reason && reason.trim()) handleReject(r.id, reason.trim());
+                                }}
+                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold"
+                              >Reject</button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-xs">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -632,11 +1063,69 @@ export function LeavePage() {
           ) : (
             <div className="space-y-3">
               {leaveApplications.map(app => (
-                <LeaveApplicationCard key={app.id} application={app} />
+                <LeaveApplicationCard key={app.id} application={app} onCancel={handleCancel} />
               ))}
             </div>
           )}
         </div>
+
+        {isManager && (
+          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="h-10 w-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Leave Policies (Quotas)</h2>
+                <p className="text-sm text-slate-600">Set yearly quota per leave type and apply to all active employees</p>
+              </div>
+            </div>
+
+            {leaveTypes.length === 0 ? (
+              <p className="text-slate-500">No leave types configured.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="text-left text-sm text-slate-500 border-b">
+                      <th className="py-3 px-4">Leave Type</th>
+                      <th className="py-3 px-4">Code</th>
+                      <th className="py-3 px-4">Yearly Quota</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaveTypes.map((lt) => (
+                      <tr key={lt.id} className="border-b border-slate-100">
+                        <td className="py-3 px-4 font-semibold text-slate-900">{lt.name}</td>
+                        <td className="py-3 px-4 text-slate-600">{lt.code}</td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.5}
+                            value={policyQuotas[lt.id] ?? ''}
+                            onChange={(e) => setPolicyQuotas({ ...policyQuotas, [lt.id]: e.target.value === '' ? (undefined as any) : Number(e.target.value) })}
+                            placeholder="e.g., 12"
+                            className="w-32 px-3 py-2 border-2 border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={handleApplyQuotas}
+                className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-emerald-800"
+              >
+                Apply to all employees (current year)
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -691,12 +1180,13 @@ function LeaveBalanceCard({ balance }: { balance: LeaveBalance }) {
   );
 }
 
-function LeaveApplicationCard({ application }: { application: LeaveApplication }) {
+function LeaveApplicationCard({ application, onCancel }: { application: LeaveApplication; onCancel?: (id: string) => void }) {
   const getStatusBadge = (status: string) => {
     const badges: { [key: string]: { color: string; icon: any } } = {
       pending: { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
       approved: { color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle },
       rejected: { color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
+      cancelled: { color: 'bg-slate-100 text-slate-700 border-slate-200', icon: XCircle },
     };
     const badge = badges[status] || badges.pending;
     const Icon = badge.icon;
@@ -739,6 +1229,16 @@ function LeaveApplicationCard({ application }: { application: LeaveApplication }
       {application.rejected_reason && (
         <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-red-900"><strong>Rejection Reason:</strong> {application.rejected_reason}</p>
+        </div>
+      )}
+      {application.status === 'pending' && onCancel && (
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => onCancel(application.id)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border-2 border-slate-200 text-slate-700 hover:bg-slate-50"
+          >
+            Cancel Request
+          </button>
         </div>
       )}
     </div>
@@ -835,5 +1335,21 @@ function PendingApplicationCard({ application, onApprove, onReject }: {
         </div>
       </div>
     </>
+  );
+}
+
+function StatCard({ label, value, color }: { label: string; value: number; color: 'blue' | 'emerald' | 'amber' }) {
+  const colorMap: any = {
+    blue: 'from-blue-500 to-blue-600',
+    emerald: 'from-emerald-500 to-emerald-600',
+    amber: 'from-amber-500 to-amber-600',
+  };
+  return (
+    <div className="p-4 border-2 border-slate-200 rounded-xl">
+      <p className="text-sm text-slate-600">{label}</p>
+      <div className={`mt-2 inline-flex items-center justify-center h-10 px-4 rounded-lg text-white font-bold bg-gradient-to-r ${colorMap[color]}`}>
+        {value}
+      </div>
+    </div>
   );
 }

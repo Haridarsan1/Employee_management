@@ -230,26 +230,57 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
       const today = new Date().toISOString().split('T')[0];
       const now = new Date().toISOString();
       
-      const { data, error } = await supabase
+      // Check if a record already exists for today
+      const { data: existingRecord } = await supabase
         .from('attendance_records')
-        .insert({
-          employee_id: membership.employee_id,
-          attendance_date: today,
-          status: 'present',
-          check_in_time: now,
-          is_manual_entry: true,
-          marked_by: membership.employee_id
-        })
-        .select()
-        .single();
+        .select('*')
+        .eq('employee_id', membership.employee_id)
+        .eq('attendance_date', today)
+        .maybeSingle();
       
-      if (error) throw error;
+      let data;
+      
+      if (existingRecord) {
+        // Update existing record with check-in time
+        const { data: updated, error: updateError } = await supabase
+          .from('attendance_records')
+          .update({
+            status: 'present',
+            check_in_time: now,
+            is_manual_entry: true,
+            marked_by: membership.employee_id
+          })
+          .eq('id', existingRecord.id)
+          .select()
+          .single();
+        
+        if (updateError) throw updateError;
+        data = updated;
+      } else {
+        // Create new record
+        const { data: created, error: insertError } = await supabase
+          .from('attendance_records')
+          .insert({
+            employee_id: membership.employee_id,
+            attendance_date: today,
+            status: 'present',
+            check_in_time: now,
+            is_manual_entry: true,
+            marked_by: membership.employee_id
+          })
+          .select()
+          .single();
+        
+        if (insertError) throw insertError;
+        data = created;
+      }
       
       setTodayAttendanceRecord(data);
       console.log('✅ Checked in successfully');
       
       // Reload dashboard data to update stats
       await loadDashboardData();
+      await loadTodayAttendance();
     } catch (error) {
       console.error('❌ Error checking in:', error);
       alert('Failed to check in. Please try again.');

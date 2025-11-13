@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
-          await loadUserProfile(session.user.id);
+          await loadUserProfile(session.user.id, session.user);
         } else {
           setProfile(null);
           setOrganization(null);
@@ -81,14 +81,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Note: Removed a broken useEffect that attempted to manage user roles directly from session
   // to avoid undefined variables and duplicate logic. Role is derived via membership and permissions.
 
-  const loadUserProfile = async (userId: string) => {
+  const loadUserProfile = async (userId: string, currentUser?: User) => {
     console.log('=== LOADING USER PROFILE ===');
     console.log('User ID:', userId);
-    console.log('User object exists:', !!user);
-    console.log('User object:', user);
-    console.log('User metadata exists:', !!user?.user_metadata);
-    console.log('User metadata keys:', user?.user_metadata ? Object.keys(user.user_metadata) : 'No metadata');
-    console.log('User metadata organization_name:', user?.user_metadata?.organization_name);
+    console.log('User object exists:', !!currentUser);
+    console.log('User object:', currentUser);
+    console.log('User metadata exists:', !!currentUser?.user_metadata);
+    console.log('User metadata keys:', currentUser?.user_metadata ? Object.keys(currentUser.user_metadata) : 'No metadata');
+    console.log('User metadata organization_name:', currentUser?.user_metadata?.organization_name);
     console.log('LocalStorage pendingOrganizationName:', localStorage.getItem('pendingOrganizationName'));
     console.log('=== END USER PROFILE DEBUG ===');
     try {
@@ -126,8 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('No profile found, creating organization for user...');
         
         // Try multiple sources for organization name (in priority order)
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        const orgNameFromMetadata = currentUser?.user_metadata?.organization_name;
+        // Use the passed currentUser or fetch fresh data
+        const userToCheck = currentUser || (await supabase.auth.getUser()).data.user;
+        const orgNameFromMetadata = userToCheck?.user_metadata?.organization_name;
         
         // Check database for pending organization
         let orgNameFromDB: string | null = null;

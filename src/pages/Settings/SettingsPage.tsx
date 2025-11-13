@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Palette, Moon, Sun, Sparkles, Check, Globe, Type, Save, Github, Key, ExternalLink } from 'lucide-react';
+import { Settings as SettingsIcon, Palette, Moon, Sun, Sparkles, Check, Globe, Type, Save, Github, Key, ExternalLink, Eye, EyeOff } from 'lucide-react';
 import { MasterDataManager } from '../../components/Settings/MasterDataManager';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -60,6 +60,7 @@ export function SettingsPage() {
   const [language, setLanguage] = useState('English');
   const [hasChanges, setHasChanges] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [showGithubToken, setShowGithubToken] = useState(false);
 
   useEffect(() => {
     const savedFont = localStorage.getItem('fontFamily') || 'inter';
@@ -486,11 +487,24 @@ export function SettingsPage() {
                         GitHub Personal Access Token
                       </label>
                       <div className="flex gap-3">
-                        <input
-                          type="password"
-                          placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                          className="flex-1 px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        <div className="relative flex-1">
+                          <input
+                            type={showGithubToken ? "text" : "password"}
+                            placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                            className="w-full px-4 py-3 pr-10 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowGithubToken(!showGithubToken)}
+                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                          >
+                            {showGithubToken ? (
+                              <EyeOff className="h-5 w-5" />
+                            ) : (
+                              <Eye className="h-5 w-5" />
+                            )}
+                          </button>
+                        </div>
                         <button className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium">
                           Save Token
                         </button>

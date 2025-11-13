@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Briefcase, DollarSign, FileText, Mail, Phone, MapPin, Calendar, Building, Sparkles, Download, Eye, Edit, Save, X, Lock, Camera, CheckCircle, AlertCircle, Clock, TrendingUp, Calendar as CalendarIcon, Award } from 'lucide-react';
+import { User, Briefcase, DollarSign, FileText, Mail, Phone, MapPin, Calendar, Building, Sparkles, Download, Eye, EyeOff, Edit, Save, X, Lock, Camera, CheckCircle, AlertCircle, Clock, TrendingUp, Calendar as CalendarIcon, Award } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -61,6 +61,8 @@ export function EmployeeProfilePage() {
     newPassword: '',
     confirmPassword: ''
   });
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     if (membership?.role && ['admin', 'hr'].includes(membership.role)) {
@@ -393,25 +395,51 @@ export function EmployeeProfilePage() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">New Password</label>
-                <input
-                  type="password"
-                  value={passwordData.newPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter new password"
-                  minLength={6}
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={passwordData.newPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                    className="w-full px-4 py-3 pr-10 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter new password"
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Confirm Password</label>
-                <input
-                  type="password"
-                  value={passwordData.confirmPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Confirm new password"
-                  minLength={6}
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={passwordData.confirmPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                    className="w-full px-4 py-3 pr-10 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Confirm new password"
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
               </div>
               <div className="flex gap-3 pt-4">
                 <button

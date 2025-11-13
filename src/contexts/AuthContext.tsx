@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { UserRole } from '../lib/database.types';
@@ -56,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<Permissions>(getPermissions(null));
   const [loading, setLoading] = useState(true);
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
+  const isLoadingProfileRef = useRef(false);
    // const [userRole, setUserRole] = useState<UserRole | null>(null); // Commenting out unused state
 
   useEffect(() => {
@@ -64,7 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
-          await loadUserProfile(session.user.id, session.user);
+          // Prevent concurrent profile loads
+          if (!isLoadingProfileRef.current) {
+            isLoadingProfileRef.current = true;
+            await loadUserProfile(session.user.id, session.user);
+            isLoadingProfileRef.current = false;
+          }
         } else {
           setProfile(null);
           setOrganization(null);
@@ -123,7 +129,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // If no profile exists, this might be a new user after email confirmation
       // Try to get organization name from multiple sources
       if (!profileData) {
-        console.log('No profile found, creating organization for user...');
+        console.log('No profile found, attempting to create organization for user...');
+        
+        // Check if organization already exists to prevent duplicates
+        const { data: existingOrg } = await supabase
+          .from('organizations')
+          .select('id')
+          .eq('owner_id', userId)
+          .maybeSingle();
+        
+        if (existingOrg) {
+          console.log('Organization already exists for user, skipping creation');
+          // Just reload the profile which should now have the organization
+          const { data: refreshedProfile } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+          
+          if (refreshedProfile) {
+            setProfile(refreshedProfile);
+            if (refreshedProfile.current_organization_id) {
+              await loadOrganizationData(refreshedProfile.current_organization_id, userId);
+            }
+          }
+          setLoading(false);
+          return;
+        }
         
         // Try multiple sources for organization name (in priority order)
         // Use the passed currentUser or fetch fresh data

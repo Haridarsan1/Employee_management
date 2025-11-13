@@ -272,22 +272,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (memberError) throw memberError;
       console.log('Membership loaded:', memberData);
 
-      // If no membership exists but user is the owner, create admin membership
+      // If no membership exists but user is the owner, create owner membership
       if (!memberData && orgData && orgData.owner_id === userId) {
-        console.log('User is owner but no membership found, creating admin membership...');
+        console.log('User is owner but no membership found, creating owner membership...');
         const { error: createMemberError } = await (supabase as any)
           .from('organization_members')
           .insert({
             organization_id: organizationId,
             user_id: userId,
-            role: 'admin',
+            role: 'owner',
             is_active: true
           });
 
         if (createMemberError) {
-          console.error('Failed to create admin membership:', createMemberError);
+          console.error('Failed to create owner membership:', createMemberError);
         } else {
-          console.log('Admin membership created for owner');
+          console.log('Owner membership created for owner');
           // Reload membership
           const { data: newMemberData, error: newMemberError } = await (supabase as any)
             .from('organization_members')
@@ -315,8 +315,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    if (error) {
+      // Check if it's an email not confirmed error
+      if (error.message.toLowerCase().includes('email not confirmed') || 
+          error.message.toLowerCase().includes('confirmation')) {
+        throw new Error('Email confirmation is not yet done. Please check your email and confirm your account.');
+      }
+      throw error;
+    }
+    
+    // Additional check: verify email is confirmed
+    if (data?.user && !data.user.email_confirmed_at) {
+      await supabase.auth.signOut();
+      throw new Error('Email confirmation is not yet done. Please check your email and confirm your account.');
+    }
   };
 
   const signUp = async (email: string, password: string, organizationName: string) => {
@@ -614,7 +628,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(currentUser);
 
         if (currentUser) {
-          await loadUserProfile(currentUser.id);
+          // Only load if not already loaded for this user
+          if (lastUserIdRef.current !== currentUser.id) {
+            lastUserIdRef.current = currentUser.id;
+            await loadUserProfile(currentUser.id, currentUser);
+          }
         } else {
           setProfile(null);
           setOrganization(null);

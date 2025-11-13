@@ -120,15 +120,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // If no profile exists, this might be an existing user
-      // who signed up before the fix - create a default organization for them
+      // If no profile exists, this might be a new user after email confirmation
+      // Try to get organization name from multiple sources
       if (!profileData) {
-        console.log('No profile found, creating default organization for user...');
+        console.log('No profile found, creating organization for user...');
         
-        // Directly create a default organization
+        // Try multiple sources for organization name (in priority order)
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        const orgNameFromMetadata = currentUser?.user_metadata?.organization_name;
+        
+        // Check database for pending organization
+        let orgNameFromDB: string | null = null;
         try {
-          await createOrganizationForUser(userId, 'My Organization');
-          console.log('✅ Default organization created successfully');
+          const { data: pendingOrg } = await supabase
+            .from('pending_organizations')
+            .select('organization_name')
+            .eq('user_id', userId)
+            .maybeSingle();
+          
+          if (pendingOrg) {
+            orgNameFromDB = pendingOrg.organization_name;
+            console.log('Found pending org in database:', orgNameFromDB);
+          }
+        } catch (dbError) {
+          console.error('Error checking pending_organizations:', dbError);
+        }
+        
+        const orgNameFromLocalStorage = localStorage.getItem('pendingOrganizationName');
+        const organizationName = orgNameFromDB || orgNameFromMetadata || orgNameFromLocalStorage || 'My Organization';
+        
+        console.log('Organization name from metadata:', orgNameFromMetadata);
+        console.log('Organization name from database:', orgNameFromDB);
+        console.log('Organization name from localStorage:', orgNameFromLocalStorage);
+        console.log('Final organization name:', organizationName);
+        
+        // Create organization
+        try {
+          await createOrganizationForUser(userId, organizationName);
+          console.log('✅ Organization created successfully:', organizationName);
+          
+          // Clean up all sources after successful creation
+          if (orgNameFromLocalStorage) {
+            localStorage.removeItem('pendingOrganizationName');
+          }
+          if (orgNameFromDB) {
+            await supabase
+              .from('pending_organizations')
+              .delete()
+              .eq('user_id', userId);
+          }
           
           // Reload profile after creation
           const { data: newProfileData, error: reloadError } = await supabase
@@ -138,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .maybeSingle();
 
           if (reloadError) {
-            console.error('Error reloading profile after default org creation:', reloadError);
+            console.error('Error reloading profile after org creation:', reloadError);
           } else if (newProfileData) {
             setProfile(newProfileData);
             if (newProfileData.current_organization_id) {
@@ -147,10 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         } catch (createError) {
-          console.error('❌ Failed to create default organization:', createError);
+          console.error('❌ Failed to create organization:', createError);
         }
         
-        console.log('ℹ️ Organization creation failed for user:', userId);
+        console.log('ℹ️ Organization creation process completed for user:', userId);
       } else {
         setProfile(profileData);
 
@@ -244,7 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log('Email:', email);
     console.log('Organization:', organizationName);
 
-    // Store organization name in localStorage for cross-tab persistence
+    // Store organization name in localStorage for immediate backup
     localStorage.setItem('pendingOrganizationName', organizationName);
     console.log('Stored in localStorage:', localStorage.getItem('pendingOrganizationName'));
 
@@ -260,7 +300,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (error) {
       console.error('Auth signup error:', error);
-      // Clean up localStorage on error
       localStorage.removeItem('pendingOrganizationName');
       throw error;
     }
@@ -272,10 +311,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.user && data.session) {
       console.log('User is immediately signed in, creating organization...');
       await createOrganizationForUser(data.user.id, organizationName);
-      // Clean up localStorage since organization was created
       localStorage.removeItem('pendingOrganizationName');
-    } else {
-      console.log('Email confirmation required, organization name stored in localStorage');
+    } else if (data.user) {
+      // Store in database for persistence across sessions
+      console.log('Email confirmation required, storing org name in database...');
+      try {
+        await supabase
+          .from('pending_organizations')
+          .insert({
+            user_id: data.user.id,
+            organization_name: organizationName
+          });
+        console.log('Organization name stored in pending_organizations table');
+      } catch (dbError) {
+        console.error('Failed to store pending org in database:', dbError);
+        // localStorage is still our backup
+      }
     }
     console.log('=== SIGNUP END ===');
   };

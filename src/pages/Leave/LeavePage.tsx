@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Calendar, Plus, X, Send, CheckCircle, AlertCircle, Clock, FileText, Check, XCircle, Sparkles, Info, AlertTriangle } from 'lucide-react';
+import { Calendar, Plus, X, Send, CheckCircle, AlertCircle, Clock, FileText, Check, XCircle, Sparkles, Info, AlertTriangle, TrendingUp, Users, Download, Filter, SortAsc } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { useScope } from '../../contexts/ScopeContext';
 import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 interface LeaveType {
@@ -53,7 +52,6 @@ interface ApplyLeaveForm {
 
 export function LeavePage() {
   const { membership, organization } = useAuth();
-  const { selectedDepartmentId, selectedEmployeeId } = useScope();
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [leaveApplications, setLeaveApplications] = useState<LeaveApplication[]>([]);
@@ -64,9 +62,8 @@ export function LeavePage() {
   const [selectedLeaveType, setSelectedLeaveType] = useState<LeaveType | null>(null);
   // Manager/Owner views
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [selectedDepartment] = useState<string>('all');
   const [allRequests, setAllRequests] = useState<any[]>([]);
-  const [deptStats, setDeptStats] = useState({ total: 0, approved: 0, pending: 0 });
   const [showApproveModal, setShowApproveModal] = useState<{ open: boolean; id: string | null }>({ open: false, id: null });
   const [approveRemark, setApproveRemark] = useState('');
   const [policyQuotas, setPolicyQuotas] = useState<Record<string, number>>({});
@@ -79,6 +76,32 @@ export function LeavePage() {
     contact_number: '',
     half_day_period: ''
   });
+  
+  // Owner Dashboard Metrics
+  const [ownerMetrics, setOwnerMetrics] = useState({
+    totalRequests: 0,
+    pendingRequests: 0,
+    approvedRequests: 0,
+    rejectedRequests: 0,
+    currentlyOnLeave: 0,
+    upcomingLeaves: 0
+  });
+  const [monthlyTrends, setMonthlyTrends] = useState<{ month: string; count: number }[]>([]);
+  const [leaveTypeDistribution, setLeaveTypeDistribution] = useState<{ type: string; count: number; color: string }[]>([]);
+  
+  // Advanced Filters
+  const [filters, setFilters] = useState({
+    status: 'all',
+    leaveType: 'all',
+    department: 'all',
+    dateFrom: '',
+    dateTo: ''
+  });
+  const [sortBy, setSortBy] = useState<'date' | 'employee' | 'status'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  
+  // Policy Configuration
+  const [showPolicyConfig, setShowPolicyConfig] = useState(false);
 
   const isManager = membership?.role && ['owner','admin', 'hr', 'manager'].includes(membership.role);
 
@@ -101,7 +124,8 @@ export function LeavePage() {
             if (isManager) {
               await Promise.all([
                 loadPendingApplications(),
-                loadAllRequests(selectedDepartment),
+                loadAllRequests(),
+                loadOwnerMetrics()
               ]);
             }
           } catch (e) {
@@ -123,7 +147,8 @@ export function LeavePage() {
         loadLeaveApplications(),
         isManager && loadPendingApplications(),
         isManager && loadDepartments(),
-        isManager && loadAllRequests()
+        isManager && loadAllRequests(),
+        isManager && loadOwnerMetrics()
       ]);
     } catch (error) {
       console.error('Error loading leave data:', error);
@@ -217,10 +242,109 @@ export function LeavePage() {
     }
   };
 
-  const loadAllRequests = async (deptId?: string) => {
+  const loadOwnerMetrics = async () => {
+    if (!organization?.id || !isManager) return;
+    
+    try {
+      // Load all leave applications for the organization
+      const { data: allLeaves, error } = await supabase
+        .from('leave_applications')
+        .select(`
+          *,
+          leave_types (*),
+          employees!inner(organization_id)
+        `)
+        .eq('employees.organization_id', organization.id);
+      
+      if (error) throw error;
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Calculate metrics
+      const totalRequests = allLeaves?.length || 0;
+      const pendingRequests = allLeaves?.filter(l => l.status === 'pending').length || 0;
+      const approvedRequests = allLeaves?.filter(l => l.status === 'approved').length || 0;
+      const rejectedRequests = allLeaves?.filter(l => l.status === 'rejected').length || 0;
+      
+      // Currently on leave (approved leaves where today is between from_date and to_date)
+      const currentlyOnLeave = allLeaves?.filter(l => {
+        if (l.status !== 'approved') return false;
+        const from = new Date(l.from_date);
+        const to = new Date(l.to_date);
+        from.setHours(0, 0, 0, 0);
+        to.setHours(0, 0, 0, 0);
+        return today >= from && today <= to;
+      }).length || 0;
+      
+      // Upcoming leaves (approved leaves starting after today)
+      const upcomingLeaves = allLeaves?.filter(l => {
+        if (l.status !== 'approved') return false;
+        const from = new Date(l.from_date);
+        from.setHours(0, 0, 0, 0);
+        return from > today;
+      }).length || 0;
+      
+      setOwnerMetrics({
+        totalRequests,
+        pendingRequests,
+        approvedRequests,
+        rejectedRequests,
+        currentlyOnLeave,
+        upcomingLeaves
+      });
+      
+      // Calculate monthly trends (last 6 months)
+      const monthlyData: Record<string, number> = {};
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date();
+        date.setMonth(date.getMonth() - i);
+        const key = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+        monthlyData[key] = 0;
+      }
+      
+      allLeaves?.forEach(leave => {
+        const appliedDate = new Date(leave.applied_date);
+        const key = `${monthNames[appliedDate.getMonth()]} ${appliedDate.getFullYear()}`;
+        if (monthlyData.hasOwnProperty(key)) {
+          monthlyData[key]++;
+        }
+      });
+      
+      setMonthlyTrends(
+        Object.entries(monthlyData).map(([month, count]) => ({ month, count }))
+      );
+      
+      // Calculate leave type distribution
+      const typeDistribution: Record<string, { count: number; color: string }> = {};
+      allLeaves?.forEach(leave => {
+        const typeName = leave.leave_types?.name || 'Unknown';
+        const typeColor = leave.leave_types?.color || '#6B7280';
+        if (!typeDistribution[typeName]) {
+          typeDistribution[typeName] = { count: 0, color: typeColor };
+        }
+        typeDistribution[typeName].count++;
+      });
+      
+      setLeaveTypeDistribution(
+        Object.entries(typeDistribution).map(([type, data]) => ({
+          type,
+          count: data.count,
+          color: data.color
+        }))
+      );
+      
+    } catch (error) {
+      console.error('Error loading owner metrics:', error);
+    }
+  };
+
+  const loadAllRequests = async () => {
     if (!organization?.id) return;
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from('leave_applications')
         .select(`
           *,
@@ -233,31 +357,13 @@ export function LeavePage() {
         .eq('employees.organization_id', organization.id)
         .order('applied_date', { ascending: false });
 
-      const filterDept = typeof deptId === 'string' ? deptId : selectedDepartment;
-      if (filterDept && filterDept !== 'all') {
-        query = query.eq('employees.department_id', filterDept);
-      }
-
-      const { data, error } = await query;
       if (error) throw error;
       setAllRequests(data || []);
-      const total = data?.length || 0;
-      const approved = data?.filter((d: any) => d.status === 'approved').length || 0;
-      const pending = data?.filter((d: any) => d.status === 'pending').length || 0;
-      setDeptStats({ total, approved, pending });
     } catch (error) {
       console.error('Error loading all leave requests:', error);
       setAllRequests([]);
-      setDeptStats({ total: 0, approved: 0, pending: 0 });
     }
   };
-
-  useEffect(() => {
-    if (isManager) {
-      loadAllRequests(selectedDepartment);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDepartment]);
 
   const calculateDays = () => {
     if (!formData.from_date || !formData.to_date) return 0;
@@ -630,6 +736,99 @@ export function LeavePage() {
     }
   };
 
+  const exportToCSV = () => {
+    if (!allRequests.length) return;
+    
+    // Apply filters
+    let filteredData = [...allRequests];
+    
+    if (filters.status !== 'all') {
+      filteredData = filteredData.filter(r => r.status === filters.status);
+    }
+    if (filters.leaveType !== 'all') {
+      filteredData = filteredData.filter(r => r.leave_type_id === filters.leaveType);
+    }
+    if (filters.department !== 'all') {
+      filteredData = filteredData.filter(r => r.employees?.department_id === filters.department);
+    }
+    if (filters.dateFrom) {
+      filteredData = filteredData.filter(r => new Date(r.from_date) >= new Date(filters.dateFrom));
+    }
+    if (filters.dateTo) {
+      filteredData = filteredData.filter(r => new Date(r.to_date) <= new Date(filters.dateTo));
+    }
+    
+    // Create CSV content
+    const headers = ['Employee Name', 'Employee Code', 'Department', 'Leave Type', 'From Date', 'To Date', 'Total Days', 'Status', 'Applied Date', 'Reason'];
+    const rows = filteredData.map(r => [
+      `${r.employees?.first_name || ''} ${r.employees?.last_name || ''}`,
+      r.employees?.employee_code || '',
+      r.employees?.departments?.name || '',
+      r.leave_types?.name || '',
+      new Date(r.from_date).toLocaleDateString(),
+      new Date(r.to_date).toLocaleDateString(),
+      r.total_days,
+      r.status,
+      new Date(r.applied_date).toLocaleDateString(),
+      `"${r.reason.replace(/"/g, '""')}"`
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+    
+    // Download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `leave_requests_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const getFilteredAndSortedRequests = () => {
+    let filtered = [...allRequests];
+    
+    // Apply filters
+    if (filters.status !== 'all') {
+      filtered = filtered.filter(r => r.status === filters.status);
+    }
+    if (filters.leaveType !== 'all') {
+      filtered = filtered.filter(r => r.leave_type_id === filters.leaveType);
+    }
+    if (filters.department !== 'all') {
+      filtered = filtered.filter(r => r.employees?.department_id === filters.department);
+    }
+    if (filters.dateFrom) {
+      filtered = filtered.filter(r => new Date(r.from_date) >= new Date(filters.dateFrom));
+    }
+    if (filters.dateTo) {
+      filtered = filtered.filter(r => new Date(r.to_date) <= new Date(filters.dateTo));
+    }
+    
+    // Apply sorting
+    filtered.sort((a, b) => {
+      if (sortBy === 'date') {
+        const aDate = new Date(a.applied_date).getTime();
+        const bDate = new Date(b.applied_date).getTime();
+        return sortOrder === 'asc' ? aDate - bDate : bDate - aDate;
+      } else if (sortBy === 'employee') {
+        const aName = `${a.employees?.first_name} ${a.employees?.last_name}`.toLowerCase();
+        const bName = `${b.employees?.first_name} ${b.employees?.last_name}`.toLowerCase();
+        return sortOrder === 'asc' ? aName.localeCompare(bName) : bName.localeCompare(aName);
+      } else if (sortBy === 'status') {
+        return sortOrder === 'asc' ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
+      }
+      return 0;
+    });
+    
+    return filtered;
+  };
+
   // helper functions moved to card components
 
   if (loading) {
@@ -886,7 +1085,83 @@ export function LeavePage() {
         </div>
       )}
 
+      {/* Policy Configuration Modal */}
+      <PolicyConfigurationModal
+        isOpen={showPolicyConfig}
+        onClose={() => setShowPolicyConfig(false)}
+        leaveTypes={leaveTypes}
+        departments={departments}
+        organization={organization}
+      />
+
       <div className="space-y-6 animate-fadeIn">
+        {/* Owner Metrics Dashboard */}
+        {isManager && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent flex items-center gap-3">
+                  <TrendingUp className="h-8 w-8 text-blue-600" />
+                  Leave Analytics Dashboard
+                </h1>
+                <p className="text-slate-600 mt-2">Complete HR-level view of all leave activities</p>
+              </div>
+            </div>
+
+            {/* Overview Metrics Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+              <OwnerMetricCard
+                icon={FileText}
+                title="Total Requests"
+                value={ownerMetrics.totalRequests}
+                color="blue"
+                subtitle="All time"
+              />
+              <OwnerMetricCard
+                icon={Clock}
+                title="Pending"
+                value={ownerMetrics.pendingRequests}
+                color="amber"
+                subtitle="Awaiting approval"
+              />
+              <OwnerMetricCard
+                icon={CheckCircle}
+                title="Approved"
+                value={ownerMetrics.approvedRequests}
+                color="emerald"
+                subtitle="Granted leaves"
+              />
+              <OwnerMetricCard
+                icon={XCircle}
+                title="Rejected"
+                value={ownerMetrics.rejectedRequests}
+                color="red"
+                subtitle="Declined requests"
+              />
+              <OwnerMetricCard
+                icon={Users}
+                title="On Leave Today"
+                value={ownerMetrics.currentlyOnLeave}
+                color="purple"
+                subtitle="Currently away"
+              />
+              <OwnerMetricCard
+                icon={Calendar}
+                title="Upcoming"
+                value={ownerMetrics.upcomingLeaves}
+                color="cyan"
+                subtitle="Scheduled leaves"
+              />
+            </div>
+
+            {/* Charts Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <MonthlyTrendsChart data={monthlyTrends} />
+              <LeaveTypeDistributionChart data={leaveTypeDistribution} />
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent flex items-center gap-3">
@@ -958,30 +1233,140 @@ export function LeavePage() {
                   <p className="text-sm text-slate-600">Organization-wide leave applications</p>
                 </div>
               </div>
-              <div>
-                <select
-                  value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
-                  className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              <button
+                onClick={exportToCSV}
+                disabled={allRequests.length === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-lg hover:from-emerald-700 hover:to-emerald-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+            </div>
+
+            {/* Advanced Filters */}
+            <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2 mb-3">
+                <Filter className="h-5 w-5 text-slate-600" />
+                <h3 className="font-semibold text-slate-900">Advanced Filters</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Status</label>
+                  <select
+                    value={filters.status}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Leave Type</label>
+                  <select
+                    value={filters.leaveType}
+                    onChange={(e) => setFilters({ ...filters, leaveType: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Types</option>
+                    {leaveTypes.map(type => (
+                      <option key={type.id} value={type.id}>{type.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Department</label>
+                  <select
+                    value={filters.department}
+                    onChange={(e) => setFilters({ ...filters, department: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All Departments</option>
+                    {departments.map(dept => (
+                      <option key={dept.id} value={dept.id}>{dept.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">From Date</label>
+                  <input
+                    type="date"
+                    value={filters.dateFrom}
+                    onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">To Date</label>
+                  <input
+                    type="date"
+                    value={filters.dateTo}
+                    onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <SortAsc className="h-4 w-4 text-slate-600" />
+                  <span className="text-xs font-semibold text-slate-600">Sort By:</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setSortBy('date');
+                    setSortOrder(sortBy === 'date' && sortOrder === 'desc' ? 'asc' : 'desc');
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    sortBy === 'date' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
                 >
-                  <option value="all">All Departments</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
+                  Date {sortBy === 'date' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+                <button
+                  onClick={() => {
+                    setSortBy('employee');
+                    setSortOrder(sortBy === 'employee' && sortOrder === 'desc' ? 'asc' : 'desc');
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    sortBy === 'employee' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  Employee {sortBy === 'employee' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+                <button
+                  onClick={() => {
+                    setSortBy('status');
+                    setSortOrder(sortBy === 'status' && sortOrder === 'desc' ? 'asc' : 'desc');
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    sortBy === 'status' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  Status {sortBy === 'status' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+                <button
+                  onClick={() => setFilters({ status: 'all', leaveType: 'all', department: 'all', dateFrom: '', dateTo: '' })}
+                  className="ml-auto px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-semibold"
+                >
+                  Clear Filters
+                </button>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <StatCard label="Total" value={deptStats.total} color="blue" />
-              <StatCard label="Approved" value={deptStats.approved} color="emerald" />
-              <StatCard label="Pending" value={deptStats.pending} color="amber" />
+              <StatCard label="Total" value={getFilteredAndSortedRequests().length} color="blue" />
+              <StatCard label="Approved" value={getFilteredAndSortedRequests().filter(r => r.status === 'approved').length} color="emerald" />
+              <StatCard label="Pending" value={getFilteredAndSortedRequests().filter(r => r.status === 'pending').length} color="amber" />
             </div>
 
-            {allRequests.length === 0 ? (
+            {getFilteredAndSortedRequests().length === 0 ? (
               <div className="text-center py-12">
                 <Calendar className="h-16 w-16 text-slate-300 mx-auto mb-4" />
                 <p className="text-slate-600 font-semibold">No requests found</p>
+                <p className="text-sm text-slate-500 mt-1">Try adjusting your filters</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -999,7 +1384,7 @@ export function LeavePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {allRequests.slice(0, 50).map((r: any) => (
+                    {getFilteredAndSortedRequests().slice(0, 100).map((r: any) => (
                       <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                         <td className="py-3 px-4">
                           <div>
@@ -1073,16 +1458,35 @@ export function LeavePage() {
           )}
         </div>
 
+        {/* Leave Calendar View */}
+        {isManager && allRequests.length > 0 && (
+          <LeaveCalendarView
+            leaves={allRequests}
+            departments={departments}
+            selectedDept={filters.department}
+            onDeptChange={(deptId) => setFilters({ ...filters, department: deptId })}
+          />
+        )}
+
         {isManager && (
           <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="h-10 w-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-white" />
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
+                  <Sparkles className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Leave Policies (Quotas)</h2>
+                  <p className="text-sm text-slate-600">Set yearly quota per leave type and apply to all active employees</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">Leave Policies (Quotas)</h2>
-                <p className="text-sm text-slate-600">Set yearly quota per leave type and apply to all active employees</p>
-              </div>
+              <button
+                onClick={() => setShowPolicyConfig(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl hover:from-emerald-700 hover:to-emerald-800 transition-all shadow-lg hover:shadow-xl"
+              >
+                <Sparkles className="h-4 w-4" />
+                Configure Policy
+              </button>
             </div>
 
             {leaveTypes.length === 0 ? (
@@ -1132,6 +1536,317 @@ export function LeavePage() {
         )}
       </div>
     </>
+  );
+}
+
+// Owner Metrics Dashboard Components
+function OwnerMetricCard({ icon: Icon, title, value, color, subtitle }: {
+  icon: any;
+  title: string;
+  value: number;
+  color: string;
+  subtitle?: string;
+}) {
+  const colorClasses: Record<string, string> = {
+    blue: 'from-blue-500 to-blue-600',
+    emerald: 'from-emerald-500 to-emerald-600',
+    amber: 'from-amber-500 to-amber-600',
+    red: 'from-red-500 to-red-600',
+    purple: 'from-purple-500 to-purple-600',
+    cyan: 'from-cyan-500 to-cyan-600'
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 hover:shadow-xl transition-shadow">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-slate-600 mb-2">{title}</p>
+          <p className="text-3xl font-bold text-slate-900 mb-1">{value}</p>
+          {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
+        </div>
+        <div className={`h-12 w-12 bg-gradient-to-br ${colorClasses[color] || colorClasses.blue} rounded-xl flex items-center justify-center`}>
+          <Icon className="h-6 w-6 text-white" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MonthlyTrendsChart({ data }: { data: { month: string; count: number }[] }) {
+  if (!data || data.length === 0) return null;
+
+  const maxCount = Math.max(...data.map(d => d.count), 1);
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="h-10 w-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+          <TrendingUp className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-slate-900">Monthly Leave Trends</h3>
+          <p className="text-sm text-slate-600">Last 6 months leave applications</p>
+        </div>
+      </div>
+      
+      <div className="space-y-4">
+        {data.map((item, index) => (
+          <div key={index} className="flex items-center gap-4">
+            <div className="w-20 text-sm font-semibold text-slate-700">{item.month}</div>
+            <div className="flex-1 flex items-center gap-2">
+              <div className="flex-1 bg-slate-100 rounded-full h-8 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-end pr-2"
+                  style={{ width: `${(item.count / maxCount) * 100}%`, minWidth: item.count > 0 ? '30px' : '0' }}
+                >
+                  {item.count > 0 && <span className="text-xs font-bold text-white">{item.count}</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LeaveTypeDistributionChart({ data }: { data: { type: string; count: number; color: string }[] }) {
+  if (!data || data.length === 0) return null;
+
+  const total = data.reduce((sum, item) => sum + item.count, 0);
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="h-10 w-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center">
+          <Calendar className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-slate-900">Leave Type Distribution</h3>
+          <p className="text-sm text-slate-600">Breakdown by leave type</p>
+        </div>
+      </div>
+      
+      <div className="space-y-3">
+        {data.map((item, index) => {
+          const percentage = total > 0 ? (item.count / total * 100).toFixed(1) : 0;
+          return (
+            <div key={index} className="flex items-center gap-4">
+              <div 
+                className="w-4 h-4 rounded-full flex-shrink-0" 
+                style={{ backgroundColor: item.color }}
+              />
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-semibold text-slate-900">{item.type}</span>
+                  <span className="text-sm font-bold text-slate-700">{item.count} ({percentage}%)</span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2">
+                  <div
+                    className="h-2 rounded-full"
+                    style={{ 
+                      width: `${percentage}%`,
+                      backgroundColor: item.color
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      
+      <div className="mt-6 pt-4 border-t border-slate-200">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-slate-600">Total Applications</span>
+          <span className="text-lg font-bold text-slate-900">{total}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeaveCalendarView({ leaves, departments, selectedDept, onDeptChange }: {
+  leaves: any[];
+  departments: { id: string; name: string }[];
+  selectedDept: string;
+  onDeptChange: (deptId: string) => void;
+}) {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+  const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
+  
+  const prevMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  };
+  
+  const nextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  };
+  
+  const today = () => {
+    setCurrentMonth(new Date());
+  };
+  
+  // Filter leaves for current month and department
+  const filteredLeaves = leaves.filter(leave => {
+    if (leave.status !== 'approved') return false;
+    
+    const leaveFrom = new Date(leave.from_date);
+    const leaveTo = new Date(leave.to_date);
+    const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+    
+    const overlaps = !(leaveTo < monthStart || leaveFrom > monthEnd);
+    
+    if (selectedDept !== 'all' && leave.employees?.department_id !== selectedDept) {
+      return false;
+    }
+    
+    return overlaps;
+  });
+  
+  const getLeavesForDay = (day: number) => {
+    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+    date.setHours(0, 0, 0, 0);
+    
+    return filteredLeaves.filter(leave => {
+      const leaveFrom = new Date(leave.from_date);
+      const leaveTo = new Date(leave.to_date);
+      leaveFrom.setHours(0, 0, 0, 0);
+      leaveTo.setHours(0, 0, 0, 0);
+      
+      return date >= leaveFrom && date <= leaveTo;
+    });
+  };
+  
+  const isToday = (day: number) => {
+    const now = new Date();
+    return day === now.getDate() && 
+           currentMonth.getMonth() === now.getMonth() && 
+           currentMonth.getFullYear() === now.getFullYear();
+  };
+  
+  const days = [];
+  for (let i = 0; i < firstDayOfMonth; i++) {
+    days.push(<div key={`empty-${i}`} className="p-2 border border-slate-100"></div>);
+  }
+  
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayLeaves = getLeavesForDay(day);
+    const isCurrentDay = isToday(day);
+    
+    days.push(
+      <div 
+        key={day} 
+        className={`min-h-[100px] p-2 border border-slate-200 ${isCurrentDay ? 'bg-blue-50 border-blue-300' : 'bg-white'} hover:bg-slate-50 transition-colors`}
+      >
+        <div className={`text-sm font-semibold mb-1 ${isCurrentDay ? 'text-blue-600' : 'text-slate-700'}`}>
+          {day}
+          {isCurrentDay && <span className="ml-1 text-xs">(Today)</span>}
+        </div>
+        <div className="space-y-1">
+          {dayLeaves.slice(0, 3).map((leave, idx) => (
+            <div
+              key={idx}
+              className="px-2 py-1 rounded text-xs font-semibold truncate"
+              style={{ 
+                backgroundColor: `${leave.leave_types?.color}20`,
+                color: leave.leave_types?.color || '#6B7280',
+                borderLeft: `3px solid ${leave.leave_types?.color || '#6B7280'}`
+              }}
+              title={`${leave.employees?.first_name} ${leave.employees?.last_name} - ${leave.leave_types?.name}`}
+            >
+              {leave.employees?.first_name} {leave.employees?.last_name?.charAt(0)}.
+            </div>
+          ))}
+          {dayLeaves.length > 3 && (
+            <div className="text-xs text-slate-500 font-semibold">
+              +{dayLeaves.length - 3} more
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center">
+            <Calendar className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Leave Calendar</h2>
+            <p className="text-sm text-slate-600">Monthly view of approved leaves</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={selectedDept}
+            onChange={(e) => onDeptChange(e.target.value)}
+            className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm"
+          >
+            <option value="all">All Departments</option>
+            {departments.map(dept => (
+              <option key={dept.id} value={dept.id}>{dept.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-2xl font-bold text-slate-900">
+          {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+        </h3>
+        <div className="flex gap-2">
+          <button
+            onClick={prevMonth}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm transition-colors"
+          >
+            ← Prev
+          </button>
+          <button
+            onClick={today}
+            className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-semibold text-sm transition-colors"
+          >
+            Today
+          </button>
+          <button
+            onClick={nextMonth}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-7 gap-0 border border-slate-200 rounded-lg overflow-hidden">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+          <div key={day} className="p-3 bg-slate-100 border-b-2 border-slate-300 text-center font-bold text-slate-700 text-sm">
+            {day}
+          </div>
+        ))}
+        {days}
+      </div>
+      
+      <div className="mt-4 flex items-center gap-4 text-sm text-slate-600">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-blue-50 border-2 border-blue-300 rounded"></div>
+          <span>Today</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-slate-50 border border-slate-200 rounded"></div>
+          <span>Regular day</span>
+        </div>
+        <span className="ml-auto text-slate-500">
+          {filteredLeaves.length} approved leave(s) this month
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -1353,6 +2068,265 @@ function StatCard({ label, value, color }: { label: string; value: number; color
       <p className="text-sm text-slate-600">{label}</p>
       <div className={`mt-2 inline-flex items-center justify-center h-10 px-4 rounded-lg text-white font-bold bg-gradient-to-r ${colorMap[color]}`}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+function PolicyConfigurationModal({ 
+  isOpen, 
+  onClose, 
+  leaveTypes, 
+  departments,
+  organization 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  leaveTypes: LeaveType[];
+  departments: { id: string; name: string }[];
+  organization: any;
+}) {
+  const [selectedLeaveType, setSelectedLeaveType] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('all');
+  const [policyData, setPolicyData] = useState({
+    yearlyQuota: '',
+    carryForwardEnabled: false,
+    maxCarryForward: '',
+    minNoticeDays: '',
+    maxConsecutiveDays: '',
+    allowHalfDay: true
+  });
+  const [alertMessage, setAlertMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSave = async () => {
+    if (!selectedLeaveType) {
+      setAlertMessage({ type: 'error', message: 'Please select a leave type' });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const policyPayload = {
+        organization_id: organization?.id,
+        leave_type_id: selectedLeaveType,
+        department_id: selectedDepartment === 'all' ? null : selectedDepartment,
+        yearly_quota: parseInt(policyData.yearlyQuota) || 0,
+        carry_forward_enabled: policyData.carryForwardEnabled,
+        max_carry_forward: policyData.carryForwardEnabled ? (parseInt(policyData.maxCarryForward) || 0) : 0,
+        min_notice_days: parseInt(policyData.minNoticeDays) || 0,
+        max_consecutive_days: parseInt(policyData.maxConsecutiveDays) || 0,
+        allow_half_day: policyData.allowHalfDay,
+        effective_from: new Date().toISOString().split('T')[0]
+      };
+
+      const { error } = await supabase
+        .from('leave_policies')
+        .upsert(policyPayload, { 
+          onConflict: 'organization_id,leave_type_id,department_id',
+          ignoreDuplicates: false 
+        });
+
+      if (error) throw error;
+
+      setAlertMessage({ type: 'success', message: 'Leave policy saved successfully!' });
+      
+      // Reset form after 1.5 seconds
+      setTimeout(() => {
+        setPolicyData({
+          yearlyQuota: '',
+          carryForwardEnabled: false,
+          maxCarryForward: '',
+          minNoticeDays: '',
+          maxConsecutiveDays: '',
+          allowHalfDay: true
+        });
+        setSelectedLeaveType('');
+        setSelectedDepartment('all');
+        setAlertMessage(null);
+      }, 1500);
+    } catch (error: any) {
+      console.error('Error saving policy:', error);
+      setAlertMessage({ type: 'error', message: error.message || 'Failed to save policy' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn overflow-y-auto p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full my-8 animate-scaleIn">
+        <div className="p-6 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-t-2xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-8 w-8 text-white" />
+              <h3 className="text-xl font-bold text-white">Leave Policy Configuration</h3>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+            >
+              <X className="h-5 w-5 text-white" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {alertMessage && (
+            <div className={`p-4 rounded-xl border-2 ${
+              alertMessage.type === 'success' 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}>
+              <p className="font-semibold">{alertMessage.message}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Leave Type <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedLeaveType}
+                onChange={(e) => setSelectedLeaveType(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+              >
+                <option value="">Select leave type</option>
+                {leaveTypes.map(type => (
+                  <option key={type.id} value={type.id}>{type.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Department (Optional)
+              </label>
+              <select
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+              >
+                <option value="all">All Departments</option>
+                {departments.map(dept => (
+                  <option key={dept.id} value={dept.id}>{dept.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">Leave blank for organization-wide policy</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Yearly Quota (Days) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={policyData.yearlyQuota}
+                onChange={(e) => setPolicyData({ ...policyData, yearlyQuota: e.target.value })}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                placeholder="e.g., 20"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Minimum Notice Days
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={policyData.minNoticeDays}
+                onChange={(e) => setPolicyData({ ...policyData, minNoticeDays: e.target.value })}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                placeholder="e.g., 3"
+              />
+              <p className="text-xs text-slate-500 mt-1">Days in advance required for application</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Max Consecutive Days
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={policyData.maxConsecutiveDays}
+                onChange={(e) => setPolicyData({ ...policyData, maxConsecutiveDays: e.target.value })}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                placeholder="e.g., 10"
+              />
+              <p className="text-xs text-slate-500 mt-1">Maximum consecutive days allowed</p>
+            </div>
+
+            <div className="flex items-center gap-4 pt-8">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={policyData.allowHalfDay}
+                  onChange={(e) => setPolicyData({ ...policyData, allowHalfDay: e.target.checked })}
+                  className="w-5 h-5 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+                />
+                <span className="text-sm font-semibold text-slate-700">Allow Half Day</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 pt-5">
+            <div className="flex items-center gap-3 mb-3">
+              <input
+                type="checkbox"
+                id="carryForward"
+                checked={policyData.carryForwardEnabled}
+                onChange={(e) => setPolicyData({ ...policyData, carryForwardEnabled: e.target.checked })}
+                className="w-5 h-5 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+              />
+              <label htmlFor="carryForward" className="text-sm font-semibold text-slate-700 cursor-pointer">
+                Enable Carry Forward to Next Year
+              </label>
+            </div>
+
+            {policyData.carryForwardEnabled && (
+              <div className="ml-8 mt-3">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Maximum Carry Forward Days
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={policyData.maxCarryForward}
+                  onChange={(e) => setPolicyData({ ...policyData, maxCarryForward: e.target.value })}
+                  className="w-full md:w-64 px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  placeholder="e.g., 5"
+                />
+                <p className="text-xs text-slate-500 mt-1">Maximum unused days that can be carried forward</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 border-2 border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !selectedLeaveType}
+              className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-emerald-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving...' : 'Save Policy'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

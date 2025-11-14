@@ -55,7 +55,7 @@ interface TaskFormData {
   description: string;
   task_type: string;
   priority: string;
-  assigned_to: string;
+  assigned_to: string[];
   due_date: string;
   estimated_hours: number;
   github_repo: string;
@@ -86,7 +86,7 @@ export function TasksPage() {
     description: '',
     task_type: 'feature',
     priority: 'medium',
-    assigned_to: '',
+    assigned_to: [],
     due_date: '',
     estimated_hours: 0,
     github_repo: '',
@@ -167,40 +167,39 @@ export function TasksPage() {
   };
 
   const handleCreateTask = async () => {
-    if (!formData.title || !formData.assigned_to) {
+    if (!formData.title || !formData.assigned_to || formData.assigned_to.length === 0) {
       setAlertModal({
         type: 'error',
         title: 'Validation Error',
-        message: 'Please fill in title and assign to an employee'
+        message: 'Please fill in title and assign at least one employee'
       });
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .insert({
-          organization_id: organization?.id,
-          title: formData.title,
-          description: formData.description,
-          task_type: formData.task_type,
-          priority: formData.priority,
-          assigned_to: formData.assigned_to,
-          due_date: formData.due_date || null,
-          estimated_hours: formData.estimated_hours,
-          github_repo: formData.github_repo || null,
-          github_issue_number: formData.github_issue_number ? parseInt(formData.github_issue_number) : null,
-          github_pr_number: formData.github_pr_number ? parseInt(formData.github_pr_number) : null,
-          created_by: membership?.user_id,
-          status: 'todo'
-        });
+      const rows = formData.assigned_to.map((empId) => ({
+        organization_id: organization?.id,
+        title: formData.title,
+        description: formData.description,
+        task_type: formData.task_type,
+        priority: formData.priority,
+        assigned_to: empId,
+        due_date: formData.due_date || null,
+        estimated_hours: formData.estimated_hours,
+        github_repo: formData.github_repo || null,
+        github_issue_number: formData.github_issue_number ? parseInt(formData.github_issue_number) : null,
+        github_pr_number: formData.github_pr_number ? parseInt(formData.github_pr_number) : null,
+        created_by: membership?.user_id,
+        status: 'todo'
+      }));
 
+      const { error } = await supabase.from('tasks').insert(rows);
       if (error) throw error;
 
       setAlertModal({
         type: 'success',
         title: 'Task Created',
-        message: 'Task has been created and assigned successfully'
+        message: `${rows.length} task${rows.length > 1 ? 's' : ''} created and assigned successfully`
       });
 
       setShowCreateModal(false);
@@ -209,7 +208,7 @@ export function TasksPage() {
         description: '',
         task_type: 'feature',
         priority: 'medium',
-        assigned_to: '',
+        assigned_to: [],
         due_date: '',
         estimated_hours: 0,
         github_repo: '',
@@ -279,13 +278,15 @@ export function TasksPage() {
   };
 
   const getTaskStats = () => {
+    // Compute stats based on scoped+filtered tasks so owner can see per-department status
+    const base = getFilteredTasks();
     const stats = {
-      total: tasks.length,
-      todo: tasks.filter(t => t.status === 'todo').length,
-      in_progress: tasks.filter(t => t.status === 'in_progress').length,
-      in_review: tasks.filter(t => t.status === 'in_review').length,
-      completed: tasks.filter(t => t.status === 'completed').length,
-      overdue: tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'completed').length
+      total: base.length,
+      todo: base.filter(t => t.status === 'todo').length,
+      in_progress: base.filter(t => t.status === 'in_progress').length,
+      in_review: base.filter(t => t.status === 'in_review').length,
+      completed: base.filter(t => t.status === 'completed').length,
+      overdue: base.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== 'completed').length
     };
     return stats;
   };
@@ -456,17 +457,21 @@ export function TasksPage() {
                     Assign To <span className="text-red-500">*</span>
                   </label>
                   <select
+                    multiple
                     value={formData.assigned_to}
-                    onChange={(e) => setFormData({ ...formData, assigned_to: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500"
+                    onChange={(e) => {
+                      const values = Array.from(e.target.selectedOptions).map(opt => opt.value);
+                      setFormData({ ...formData, assigned_to: values });
+                    }}
+                    className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 min-h-[140px]"
                   >
-                    <option value="">Select Employee</option>
                     {employeesInSelectedDept.map(emp => (
                       <option key={emp.id} value={emp.id}>
                         {emp.first_name} {emp.last_name} ({emp.employee_code})
                       </option>
                     ))}
                   </select>
+                  <p className="text-xs text-slate-500 mt-1">Tip: Hold Ctrl/Cmd to select multiple employees</p>
                 </div>
 
                 <div>

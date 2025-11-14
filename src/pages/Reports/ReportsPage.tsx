@@ -63,7 +63,7 @@ export function ReportsPage() {
         .from('employees')
         .select('id, employee_code, first_name, last_name, department_id')
         .eq('organization_id', organization.id)
-        .eq('status', 'active')
+        .in('employment_status', ['active', 'probation'])
         .order('employee_code');
       setEmployees(data || []);
     } catch (error) {

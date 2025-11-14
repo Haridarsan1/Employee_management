@@ -700,7 +700,7 @@ export function LeavePage() {
         .from('employees')
         .select('id')
         .eq('organization_id', organization.id)
-        .eq('status', 'active');
+        .in('employment_status', ['active', 'probation']);
       if (empErr) throw empErr;
 
       const employeeIds = (employees || []).map((e: any) => e.id);

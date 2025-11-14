@@ -3,8 +3,15 @@
   and view related time logs and GitHub stats across their organization.
 */
 
--- Owners can manage all tasks (select/insert/update/delete)
-CREATE POLICY IF NOT EXISTS "Owners can manage all tasks"
+-- Drop existing policy if it exists (idempotent safety)
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tasks' AND policyname = 'Owners can manage all tasks'
+  ) THEN
+    EXECUTE 'DROP POLICY "Owners can manage all tasks" ON public.tasks';
+  END IF;
+END $$;
+CREATE POLICY "Owners can manage all tasks"
   ON tasks FOR ALL
   TO authenticated
   USING (
@@ -24,8 +31,14 @@ CREATE POLICY IF NOT EXISTS "Owners can manage all tasks"
     )
   );
 
--- Owners can view all time logs in their organization
-CREATE POLICY IF NOT EXISTS "Owners can view all time logs"
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'task_time_logs' AND policyname = 'Owners can view all time logs'
+  ) THEN
+    EXECUTE 'DROP POLICY "Owners can view all time logs" ON public.task_time_logs';
+  END IF;
+END $$;
+CREATE POLICY "Owners can view all time logs"
   ON task_time_logs FOR SELECT
   TO authenticated
   USING (
@@ -38,8 +51,14 @@ CREATE POLICY IF NOT EXISTS "Owners can view all time logs"
     )
   );
 
--- Owners can view all github stats in their organization
-CREATE POLICY IF NOT EXISTS "Owners can view all github stats"
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'github_stats' AND policyname = 'Owners can view all github stats'
+  ) THEN
+    EXECUTE 'DROP POLICY "Owners can view all github stats" ON public.github_stats';
+  END IF;
+END $$;
+CREATE POLICY "Owners can view all github stats"
   ON github_stats FOR SELECT
   TO authenticated
   USING (
@@ -52,8 +71,14 @@ CREATE POLICY IF NOT EXISTS "Owners can view all github stats"
     )
   );
 
--- Owners can manage github stats
-CREATE POLICY IF NOT EXISTS "Owners can manage github stats"
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'github_stats' AND policyname = 'Owners can manage github stats'
+  ) THEN
+    EXECUTE 'DROP POLICY "Owners can manage github stats" ON public.github_stats';
+  END IF;
+END $$;
+CREATE POLICY "Owners can manage github stats"
   ON github_stats FOR ALL
   TO authenticated
   USING (

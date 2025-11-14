@@ -27,7 +27,7 @@ interface LeaveApplication {
   total_days: number;
   reason: string;
   status: string;
-  applied_date: string;
+  applied_at: string;
   approved_by: string | null;
   approved_date: string | null;
   rejected_reason: string | null;
@@ -200,7 +200,7 @@ export function LeavePage() {
           leave_types (*)
         `)
         .eq('employee_id', membership.employee_id)
-        .order('applied_date', { ascending: false })
+        .order('applied_at', { ascending: false })
         .limit(20);
       setLeaveApplications(data || []);
     } catch (error) {
@@ -219,7 +219,7 @@ export function LeavePage() {
           employees (first_name, last_name, employee_code)
         `)
         .eq('status', 'pending')
-        .order('applied_date', { ascending: false });
+        .order('applied_at', { ascending: false });
       setPendingApplications(data || []);
     } catch (error) {
       console.error('Error loading pending applications:', error);
@@ -306,7 +306,7 @@ export function LeavePage() {
       }
       
       allLeaves?.forEach(leave => {
-        const appliedDate = new Date(leave.applied_date);
+        const appliedDate = new Date(leave.applied_at);
         const key = `${monthNames[appliedDate.getMonth()]} ${appliedDate.getFullYear()}`;
         if (monthlyData.hasOwnProperty(key)) {
           monthlyData[key]++;
@@ -490,7 +490,7 @@ export function LeavePage() {
           is_half_day: formData.half_day,
           half_day_period: formData.half_day ? (formData.half_day_period || null) : null,
           status: 'pending',
-          applied_date: new Date().toISOString()
+          applied_at: new Date().toISOString()
         });
 
       if (insertError) throw insertError;
@@ -769,7 +769,7 @@ export function LeavePage() {
       new Date(r.to_date).toLocaleDateString(),
       r.total_days,
       r.status,
-      new Date(r.applied_date).toLocaleDateString(),
+      new Date(r.applied_at).toLocaleDateString(),
       `"${r.reason.replace(/"/g, '""')}"`
     ]);
     
@@ -813,8 +813,8 @@ export function LeavePage() {
     // Apply sorting
     filtered.sort((a, b) => {
       if (sortBy === 'date') {
-        const aDate = new Date(a.applied_date).getTime();
-        const bDate = new Date(b.applied_date).getTime();
+        const aDate = new Date(a.applied_at).getTime();
+        const bDate = new Date(b.applied_at).getTime();
         return sortOrder === 'asc' ? aDate - bDate : bDate - aDate;
       } else if (sortBy === 'employee') {
         const aName = `${a.employees?.first_name} ${a.employees?.last_name}`.toLowerCase();
@@ -1557,15 +1557,15 @@ function OwnerMetricCard({ icon: Icon, title, value, color, subtitle }: {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 hover:shadow-xl transition-shadow">
-      <div className="flex items-start justify-between">
+    <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-6 hover:shadow-lg transition-all">
+      <div className="flex items-center justify-between">
         <div className="flex-1">
-          <p className="text-sm font-semibold text-slate-600 mb-2">{title}</p>
-          <p className="text-3xl font-bold text-slate-900 mb-1">{value}</p>
-          {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
+          <p className="text-sm font-semibold text-slate-600 mb-3">{title}</p>
+          <p className="text-4xl font-bold text-slate-900 mb-1">{value}</p>
+          {subtitle && <p className="text-xs text-slate-500 mt-2">{subtitle}</p>}
         </div>
-        <div className={`h-12 w-12 bg-gradient-to-br ${colorClasses[color] || colorClasses.blue} rounded-xl flex items-center justify-center`}>
-          <Icon className="h-6 w-6 text-white" />
+        <div className={`h-16 w-16 bg-gradient-to-br ${colorClasses[color] || colorClasses.blue} rounded-2xl flex items-center justify-center flex-shrink-0 ml-4`}>
+          <Icon className="h-8 w-8 text-white" />
         </div>
       </div>
     </div>
@@ -1938,7 +1938,7 @@ function LeaveApplicationCard({ application, onCancel }: { application: LeaveApp
         <p className="text-sm text-slate-700"><strong>Reason:</strong> {application.reason}</p>
       </div>
       <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
-        <span>Applied: {new Date(application.applied_date).toLocaleDateString()}</span>
+        <span>Applied: {new Date(application.applied_at).toLocaleDateString()}</span>
         {application.approved_date && (
           <span>
             {application.status === 'approved' ? 'Approved' : 'Rejected'}: {new Date(application.approved_date).toLocaleDateString()}

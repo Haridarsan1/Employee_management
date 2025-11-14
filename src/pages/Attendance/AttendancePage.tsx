@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Clock, MapPin, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MapPinned, Smartphone, Sparkles, Users, X } from 'lucide-react';
+import { Clock, MapPin, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MapPinned, Smartphone, Sparkles, Users, X, Download } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useScope } from '../../contexts/ScopeContext';
 import { ScopeBar } from '../../components/Scope/ScopeBar';
+import { OverviewCard } from './OverviewCard';
 
 interface LocationData {
   latitude: number;
@@ -30,6 +31,10 @@ export function AttendancePage() {
   const [allAttendanceRecords, setAllAttendanceRecords] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [alertModal, setAlertModal] = useState<AlertModal | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all'|'present'|'absent'>('all');
+  const [overrideModal, setOverrideModal] = useState<{open: boolean; record: any|null}>({open:false, record:null});
+  const [departments, setDepartments] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -43,6 +48,7 @@ export function AttendancePage() {
     }
     if (organization?.id) {
       loadOfficeLocations();
+      loadDepartments();
     }
     if (membership?.role && ['owner','admin', 'hr', 'manager'].includes(membership.role)) {
       setIsAdmin(true);
@@ -75,7 +81,8 @@ export function AttendancePage() {
             employee_code,
             first_name,
             last_name,
-            company_email
+            company_email,
+            department_id
           )
         `)
         .eq('attendance_date', selectedDate)
@@ -84,6 +91,20 @@ export function AttendancePage() {
       setAllAttendanceRecords(data || []);
     } catch (error) {
       console.error('Error loading attendance records:', error);
+    }
+  };
+
+  const loadDepartments = async () => {
+    try {
+      const { data } = await supabase
+        .from('departments')
+        .select('id, name')
+        .eq('organization_id', organization?.id || '');
+      const map: Record<string, string> = {};
+      (data || []).forEach((d: any) => { map[d.id] = d.name; });
+      setDepartments(map);
+    } catch (error) {
+      console.error('Error loading departments:', error);
     }
   };
 
@@ -286,6 +307,83 @@ export function AttendancePage() {
     }
   };
 
+  const filteredRecords = allAttendanceRecords.filter((record) => {
+    if (selectedEmployeeId && record.employees?.id !== selectedEmployeeId) return false;
+    if (!selectedEmployeeId && selectedDepartmentId && record.employees?.department_id !== selectedDepartmentId) return false;
+
+    if (statusFilter !== 'all') {
+      const isPresent = record.status === 'present' || !!record.check_in_time;
+      if (statusFilter === 'present' && !isPresent) return false;
+      if (statusFilter === 'absent' && isPresent) return false;
+    }
+
+    if (searchTerm) {
+      const hay = `${record.employees?.first_name || ''} ${record.employees?.last_name || ''} ${record.employees?.employee_code || ''} ${record.employees?.company_email || ''}`.toLowerCase();
+      if (!hay.includes(searchTerm.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  const metrics = (() => {
+    const total = filteredRecords.length;
+    const present = filteredRecords.filter(r => r.check_in_time).length;
+    const absent = Math.max(0, total - present);
+    const inOffice = filteredRecords.filter(r => r.is_within_office_radius).length;
+    const remote = present - inOffice;
+    const late = filteredRecords.filter(r => {
+      if (!r.check_in_time) return false;
+      const t = new Date(r.check_in_time);
+      return t.getHours() > 9 || (t.getHours() === 9 && t.getMinutes() > 15);
+    }).length;
+    return { total, present, absent, inOffice, remote, late };
+  })();
+
+  const handleExportCSV = () => {
+    const rows = filteredRecords.map((r) => ({
+      date: selectedDate,
+      employee: `${r.employees?.first_name || ''} ${r.employees?.last_name || ''}`.trim(),
+      code: r.employees?.employee_code || '',
+      department: departments[r.employees?.department_id || ''] || '',
+      check_in: r.check_in_time ? new Date(r.check_in_time).toLocaleTimeString() : '',
+      check_out: r.check_out_time ? new Date(r.check_out_time).toLocaleTimeString() : '',
+      in_office: r.is_within_office_radius ? 'Yes' : 'No',
+      status: r.status || (r.check_in_time ? 'present' : 'absent')
+    }));
+    const headers = Object.keys(rows[0] || { date:'', employee:'', code:'', department:'', check_in:'', check_out:'', in_office:'', status:'' });
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => `"${String((r as any)[h] ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attendance_${selectedDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const openOverride = (record: any) => setOverrideModal({ open: true, record });
+  const closeOverride = () => setOverrideModal({ open: false, record: null });
+  const saveOverride = async () => {
+    if (!overrideModal.record) return;
+    try {
+      const { id } = overrideModal.record;
+      const payload: any = {
+        status: overrideModal.record.status || 'present',
+        is_manual_entry: true,
+        check_in_time: overrideModal.record.check_in_time || null,
+        check_out_time: overrideModal.record.check_out_time || null,
+        is_within_office_radius: !!overrideModal.record.is_within_office_radius
+      };
+      const { error } = await supabase.from('attendance_records').update(payload).eq('id', id);
+      if (error) throw error;
+      setAlertModal({ type: 'success', title: 'Override Saved', message: 'Attendance updated successfully.' });
+      closeOverride();
+      await loadAllAttendance();
+    } catch (err: any) {
+      console.error('Override failed', err);
+      setAlertModal({ type: 'error', title: 'Override Failed', message: err.message || 'Could not save override' });
+    }
+  };
+
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
@@ -358,6 +456,16 @@ export function AttendancePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {isAdmin && (
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <OverviewCard label="Present" value={metrics.present} color="from-emerald-500 to-emerald-600" />
+              <OverviewCard label="Absent" value={metrics.absent} color="from-red-500 to-red-600" />
+              <OverviewCard label="Late" value={metrics.late} color="from-amber-500 to-amber-600" />
+              <OverviewCard label="In Office" value={metrics.inOffice} color="from-blue-500 to-blue-600" />
+              <OverviewCard label="Remote" value={metrics.remote} color="from-violet-500 to-violet-600" />
+              <OverviewCard label="Total" value={metrics.total} color="from-slate-500 to-slate-600" />
+            </div>
+          )}
           <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl shadow-xl p-8 text-white relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32"></div>
             <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/10 rounded-full -ml-24 -mb-24"></div>
@@ -527,15 +635,37 @@ export function AttendancePage() {
               </div>
               <h2 className="text-xl font-bold text-slate-900">Attendance Report</h2>
             </div>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search employee..."
+                className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="px-4 py-2 border-2 border-slate-200 rounded-xl"
+              >
+                <option value="all">All</option>
+                <option value="present">Present</option>
+                <option value="absent">Absent</option>
+              </select>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <button onClick={handleExportCSV} className="inline-flex items-center gap-2 px-3 py-2 border-2 border-slate-200 rounded-xl hover:bg-slate-50">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </button>
+            </div>
           </div>
 
-          {allAttendanceRecords.length === 0 ? (
+          {filteredRecords.length === 0 ? (
             <div className="text-center py-12">
               <Users className="h-16 w-16 text-slate-300 mx-auto mb-4" />
               <p className="text-slate-500 font-medium">No attendance records for this date</p>
@@ -546,14 +676,16 @@ export function AttendancePage() {
                 <thead>
                   <tr className="border-b-2 border-slate-200">
                     <th className="text-left py-3 px-4 font-semibold text-slate-700">Employee</th>
+                    <th className="text-left py-3 px-4 font-semibold text-slate-700">Department</th>
                     <th className="text-left py-3 px-4 font-semibold text-slate-700">Check In</th>
                     <th className="text-left py-3 px-4 font-semibold text-slate-700">Check Out</th>
                     <th className="text-left py-3 px-4 font-semibold text-slate-700">Location</th>
                     <th className="text-left py-3 px-4 font-semibold text-slate-700">Status</th>
+                    <th className="text-left py-3 px-4 font-semibold text-slate-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allAttendanceRecords.map((record) => (
+                  {filteredRecords.map((record) => (
                     <tr key={record.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                       <td className="py-4 px-4">
                         <div>
@@ -563,6 +695,7 @@ export function AttendancePage() {
                           <p className="text-xs text-slate-500">{record.employees?.employee_code}</p>
                         </div>
                       </td>
+                      <td className="py-4 px-4 text-sm text-slate-700">{departments[record.employees?.department_id || ''] || '-'}</td>
                       <td className="py-4 px-4">
                         <div className="text-sm">
                           <p className="font-medium text-slate-900">
@@ -598,13 +731,21 @@ export function AttendancePage() {
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-2">
                           <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                            record.is_within_office_radius
-                              ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-200'
-                              : 'bg-amber-100 text-amber-700 ring-2 ring-amber-200'
+                            record.check_in_time
+                              ? (record.is_within_office_radius ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-200' : 'bg-amber-100 text-amber-700 ring-2 ring-amber-200')
+                              : 'bg-red-100 text-red-700 ring-2 ring-red-200'
                           }`}>
-                            {record.is_within_office_radius ? 'In Office' : 'Remote'}
+                            {record.check_in_time ? (record.is_within_office_radius ? 'In Office' : 'Remote') : 'Absent'}
                           </span>
                         </div>
+                      </td>
+                      <td className="py-4 px-4">
+                        <button
+                          onClick={() => setOverrideModal({open: true, record})}
+                          className="px-3 py-1.5 text-sm border-2 border-slate-200 rounded-lg hover:bg-slate-50"
+                        >
+                          Override
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -612,6 +753,67 @@ export function AttendancePage() {
               </table>
             </div>
           )}
+        </div>
+      )}
+      {overrideModal.open && overrideModal.record && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4">
+            <div className="p-6 bg-gradient-to-r from-violet-500 to-violet-600 rounded-t-2xl text-white flex items-center justify-between">
+              <h3 className="text-lg font-bold">Manual Override</h3>
+              <button onClick={() => setOverrideModal({open:false, record:null})} className="p-1 hover:bg-white/20 rounded-lg">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Check In</label>
+                  <input
+                    type="datetime-local"
+                    value={overrideModal.record?.check_in_time ? new Date(overrideModal.record.check_in_time).toISOString().slice(0,16) : ''}
+                    onChange={(e) => setOverrideModal(v => ({...v, record: {...(v.record as any), check_in_time: e.target.value ? new Date(e.target.value).toISOString() : null }}))}
+                    className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Check Out</label>
+                  <input
+                    type="datetime-local"
+                    value={overrideModal.record?.check_out_time ? new Date(overrideModal.record.check_out_time).toISOString().slice(0,16) : ''}
+                    onChange={(e) => setOverrideModal(v => ({...v, record: {...(v.record as any), check_out_time: e.target.value ? new Date(e.target.value).toISOString() : null }}))}
+                    className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Status</label>
+                  <select
+                    value={overrideModal.record?.status || 'present'}
+                    onChange={(e) => setOverrideModal(v => ({...v, record: {...(v.record as any), status: e.target.value }}))}
+                    className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl"
+                  >
+                    <option value="present">Present</option>
+                    <option value="absent">Absent</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="inOffice"
+                    type="checkbox"
+                    checked={!!overrideModal.record?.is_within_office_radius}
+                    onChange={(e) => setOverrideModal(v => ({...v, record: {...(v.record as any), is_within_office_radius: e.target.checked }}))}
+                    className="h-5 w-5 accent-violet-600"
+                  />
+                  <label htmlFor="inOffice" className="text-sm font-semibold text-slate-700">In Office</label>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setOverrideModal({open:false, record:null})} className="flex-1 py-2 border-2 border-slate-200 rounded-xl">Cancel</button>
+                <button onClick={saveOverride} className="flex-1 py-2 bg-violet-600 text-white rounded-xl">Save</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

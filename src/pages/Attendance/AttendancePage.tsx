@@ -333,7 +333,7 @@ export function AttendancePage() {
     const late = filteredRecords.filter(r => {
       if (!r.check_in_time) return false;
       const t = new Date(r.check_in_time);
-      return t.getHours() > 9 || (t.getHours() === 9 && t.getMinutes() > 15);
+      return t.getHours() > 10 || (t.getHours() === 10 && t.getMinutes() > 15);
     }).length;
     return { total, present, absent, inOffice, remote, late };
   })();

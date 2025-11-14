@@ -490,8 +490,12 @@ export function TasksPage() {
                 <label className="block text-sm font-semibold text-slate-700 mb-2">Estimated Hours</label>
                 <input
                   type="number"
-                  value={formData.estimated_hours}
-                  onChange={(e) => setFormData({ ...formData, estimated_hours: parseFloat(e.target.value) })}
+                  value={Number.isNaN(formData.estimated_hours) ? 0 : formData.estimated_hours}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const num = v === '' ? 0 : Number(v);
+                    setFormData({ ...formData, estimated_hours: Number.isNaN(num) ? 0 : num });
+                  }}
                   min="0"
                   step="0.5"
                   className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500"

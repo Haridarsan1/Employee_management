@@ -80,6 +80,7 @@ export function TasksPage() {
   const [alertModal, setAlertModal] = useState<AlertModal | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [employeeSearch, setEmployeeSearch] = useState('');
 
   const [formData, setFormData] = useState<TaskFormData>({
     title: '',
@@ -456,22 +457,63 @@ export function TasksPage() {
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Assign To <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    multiple
-                    value={formData.assigned_to}
-                    onChange={(e) => {
-                      const values = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                      setFormData({ ...formData, assigned_to: values });
-                    }}
-                    className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 min-h-[140px]"
-                  >
-                    {employeesInSelectedDept.map(emp => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.first_name} {emp.last_name} ({emp.employee_code})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-slate-500 mt-1">Tip: Hold Ctrl/Cmd to select multiple employees</p>
+                  <div className="text-xs text-slate-500 mb-2">Use the ScopeBar to filter by department.</div>
+                  <div className="mb-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <input
+                        type="text"
+                        value={employeeSearch}
+                        onChange={(e) => setEmployeeSearch(e.target.value)}
+                        placeholder="Search employee by name, code, or email"
+                        className="w-full pl-10 pr-3 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-auto pr-1">
+                    {employeesInSelectedDept.length === 0 && (
+                      <div className="text-sm text-slate-500 col-span-full">No employees found for the current scope.</div>
+                    )}
+                    {employeesInSelectedDept
+                      .filter((emp: any) => {
+                        const term = employeeSearch.trim().toLowerCase();
+                        if (!term) return true;
+                        const name = `${emp.first_name || ''} ${emp.last_name || ''}`.toLowerCase();
+                        const code = (emp.employee_code || '').toLowerCase();
+                        const email = (emp.email || '').toLowerCase();
+                        return name.includes(term) || code.includes(term) || email.includes(term);
+                      })
+                      .map((emp: any) => {
+                      const checked = formData.assigned_to.includes(emp.id);
+                      return (
+                        <label
+                          key={emp.id}
+                          className={`flex items-center justify-between gap-3 border-2 rounded-xl px-3 py-2 cursor-pointer transition hover:border-purple-300 ${
+                            checked ? 'border-purple-400 ring-2 ring-purple-200 bg-purple-50' : 'border-slate-200'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-800 truncate">
+                              {emp.first_name} {emp.last_name}
+                            </div>
+                            <div className="text-xs text-slate-500 truncate">{emp.employee_code}</div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setFormData(prev => {
+                                const set = new Set(prev.assigned_to);
+                                if (set.has(emp.id)) set.delete(emp.id); else set.add(emp.id);
+                                return { ...prev, assigned_to: Array.from(set) };
+                              });
+                            }}
+                            className="h-5 w-5 accent-purple-600"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div>

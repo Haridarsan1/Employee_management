@@ -21,6 +21,7 @@ import { EmployeeProfilePage } from './pages/EmployeeProfile/EmployeeProfilePage
 import { TasksPage } from './pages/Tasks/TasksPage';
 import { ExpensesPage } from './pages/Expenses/ExpensesPage';
 import { HelpdeskPage } from './pages/Helpdesk/HelpdeskPage';
+import { KnowledgeBasePage } from './pages/Helpdesk/KnowledgeBasePage';
 import { PerformancePage } from './pages/Performance/PerformancePage';
 import { TrainingPage } from './pages/Training/TrainingPage';
 import { AnnouncementsPage } from './pages/Announcements/AnnouncementsPage';
@@ -110,6 +111,8 @@ function AppContent() {
         return <TrainingPage />;
       case 'helpdesk':
         return <HelpdeskPage />;
+      case 'knowledge-base':
+        return <KnowledgeBasePage />;
       case 'announcements':
         return <AnnouncementsPage />;
       case 'reports':

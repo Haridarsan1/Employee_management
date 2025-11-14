@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { Menu, X, LogOut, Bell, User, LayoutDashboard, Users, Calendar, Clock, IndianRupee, FileText, Settings, Sparkles, CheckSquare, Receipt, Headphones, Award, BookOpen, Megaphone, Github } from 'lucide-react';
+import { Menu, X, LogOut, Bell, User, LayoutDashboard, Users, Calendar, Clock, IndianRupee, FileText, Settings, Sparkles, CheckSquare, Receipt, Headphones, Award, BookOpen, Megaphone, Github, Library } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { canAccessPage } from '../lib/permissions';
 import { supabase } from '../lib/supabase';
@@ -77,6 +77,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     { id: 'performance', label: 'Performance', icon: Award, color: 'from-yellow-500 to-yellow-600', roles: ['admin', 'hr', 'manager', 'employee'] },
     { id: 'training', label: 'Training', icon: BookOpen, color: 'from-green-500 to-green-600', roles: ['admin', 'hr', 'manager', 'employee'] },
     { id: 'helpdesk', label: 'Helpdesk', icon: Headphones, color: 'from-pink-500 to-pink-600', roles: ['admin', 'hr', 'manager', 'employee'] },
+    { id: 'knowledge-base', label: 'Knowledge Base', icon: Library, color: 'from-indigo-500 to-indigo-600', roles: ['admin', 'hr', 'manager', 'employee'] },
     { id: 'announcements', label: 'Announcements', icon: Megaphone, color: 'from-fuchsia-500 to-fuchsia-600', roles: ['admin', 'hr', 'manager', 'employee'] },
     { id: 'reports', label: 'Reports', icon: FileText, color: 'from-cyan-500 to-cyan-600', roles: ['admin', 'hr', 'finance'] },
     { id: 'github', label: 'GitHub', icon: Github, color: 'from-gray-500 to-gray-600', roles: ['admin', 'hr', 'manager'] },

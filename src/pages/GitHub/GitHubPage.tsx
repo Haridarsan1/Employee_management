@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Github, Plus, Search, Star, GitFork, Eye, Code, Calendar, ExternalLink, RefreshCw, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 interface GitHubRepo {
   id: number;
@@ -33,6 +35,7 @@ interface GitHubStats {
 
 export function GitHubPage() {
   const { organization } = useAuth();
+  const { selectedDepartmentId, selectedEmployeeId } = useScope();
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [stats, setStats] = useState<GitHubStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -184,15 +187,20 @@ export function GitHubPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
+      <>
+        <ScopeBar />
+        <div className="flex items-center justify-center min-h-96">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      </>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+      <>
+        <ScopeBar />
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6">
         <div className="flex items-center gap-3">
           <AlertCircle className="h-6 w-6 text-red-600" />
           <div>
@@ -207,11 +215,14 @@ export function GitHubPage() {
           </div>
         </div>
       </div>
+      </>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <>
+      <ScopeBar />
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -411,6 +422,7 @@ export function GitHubPage() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

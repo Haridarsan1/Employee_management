@@ -3,6 +3,8 @@ import { FileText, Download, Calendar, Filter, Users, Clock, DollarSign, Trendin
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart as RechartsPieChart, Cell, LineChart, Line, Area, AreaChart, Pie } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 interface ReportFilters {
   startDate: string;
@@ -36,6 +38,7 @@ interface AlertModal {
 
 export function ReportsPage() {
   const { organization, membership } = useAuth();
+  const { selectedDepartmentId, selectedEmployeeId, employeesInSelectedDept } = useScope();
   const [activeReport, setActiveReport] = useState<string | null>(null);
   const [filters, setFilters] = useState<ReportFilters>({
     startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
@@ -461,6 +464,7 @@ export function ReportsPage() {
 
   return (
     <>
+      <ScopeBar />
       {alertModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-scaleIn">

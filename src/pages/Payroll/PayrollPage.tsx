@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { DollarSign, Calculator, FileText, Calendar, Users, TrendingUp, Eye, Edit, Plus, Filter, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 import type { Database } from '../../lib/database.types';
 
 type PayrollRecord = Database['public']['Tables']['payroll_records']['Row'] & {
@@ -18,6 +20,7 @@ type SalaryComponent = Database['public']['Tables']['salary_components']['Row'];
 
 export function PayrollPage() {
   const { organization, membership } = useAuth();
+  const { selectedDepartmentId, selectedEmployeeId, employeesInSelectedDept } = useScope();
   const [activeTab, setActiveTab] = useState<'overview' | 'records' | 'components' | 'generate'>('overview');
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [salaryComponents, setSalaryComponents] = useState<SalaryComponent[]>([]);
@@ -196,14 +199,19 @@ export function PayrollPage() {
 
   if (loading && payrollRecords.length === 0) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div>
-      </div>
+      <>
+        <ScopeBar />
+        <div className="flex items-center justify-center h-96">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <>
+      <ScopeBar />
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent flex items-center gap-3">
@@ -440,7 +448,8 @@ export function PayrollPage() {
           loading={loading}
         />
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

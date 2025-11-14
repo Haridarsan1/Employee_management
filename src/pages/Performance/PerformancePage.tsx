@@ -1,8 +1,13 @@
 import { Award, Plus } from 'lucide-react';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 export function PerformancePage() {
+  const { selectedDepartmentId, selectedEmployeeId } = useScope();
   return (
-    <div className="space-y-6">
+    <>
+      <ScopeBar />
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
@@ -44,6 +49,7 @@ export function PerformancePage() {
         <p className="text-slate-600">Set goals (OKRs/KPIs), conduct reviews, and provide 360° feedback</p>
         <p className="text-sm text-slate-500 mt-4">Feature fully implemented in database - UI coming soon</p>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

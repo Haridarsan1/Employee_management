@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Calendar, Plus, X, Send, CheckCircle, AlertCircle, Clock, FileText, Check, XCircle, Sparkles, Info, AlertTriangle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 interface LeaveType {
   id: string;
@@ -51,6 +53,7 @@ interface ApplyLeaveForm {
 
 export function LeavePage() {
   const { membership, organization } = useAuth();
+  const { selectedDepartmentId, selectedEmployeeId } = useScope();
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [leaveApplications, setLeaveApplications] = useState<LeaveApplication[]>([]);
@@ -77,7 +80,7 @@ export function LeavePage() {
     half_day_period: ''
   });
 
-  const isManager = membership?.role && ['admin', 'hr', 'manager'].includes(membership.role);
+  const isManager = membership?.role && ['owner','admin', 'hr', 'manager'].includes(membership.role);
 
   useEffect(() => {
     loadLeaveData();
@@ -642,6 +645,7 @@ export function LeavePage() {
 
   return (
     <>
+      <ScopeBar />
       {alertModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-scaleIn">

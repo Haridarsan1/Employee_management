@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Clock, MapPin, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle, MapPinned, Smartphone, Sparkles, Users, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 interface LocationData {
   latitude: number;
@@ -18,6 +20,7 @@ interface AlertModal {
 
 export function AttendancePage() {
   const { membership, organization } = useAuth();
+  const { selectedDepartmentId, selectedEmployeeId } = useScope();
   const [todayAttendance, setTodayAttendance] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -41,7 +44,7 @@ export function AttendancePage() {
     if (organization?.id) {
       loadOfficeLocations();
     }
-    if (membership?.role && ['admin', 'hr', 'manager'].includes(membership.role)) {
+    if (membership?.role && ['owner','admin', 'hr', 'manager'].includes(membership.role)) {
       setIsAdmin(true);
       loadAllAttendance();
     }
@@ -332,6 +335,7 @@ export function AttendancePage() {
         </div>
       )}
 
+    <ScopeBar />
     <div className="space-y-6 animate-fadeIn">
       <div className="flex items-center justify-between">
         <div>

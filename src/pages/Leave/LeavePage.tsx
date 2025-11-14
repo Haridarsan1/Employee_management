@@ -46,7 +46,6 @@ interface ApplyLeaveForm {
   to_date: string;
   reason: string;
   half_day: boolean;
-  contact_number: string;
   half_day_period?: 'morning' | 'afternoon' | '';
 }
 
@@ -73,7 +72,6 @@ export function LeavePage() {
     to_date: '',
     reason: '',
     half_day: false,
-    contact_number: '',
     half_day_period: ''
   });
   
@@ -486,7 +484,6 @@ export function LeavePage() {
           to_date: formData.to_date,
           total_days: days,
           reason: formData.reason,
-          contact_number: formData.contact_number || null,
           is_half_day: formData.half_day,
           half_day_period: formData.half_day ? (formData.half_day_period || null) : null,
           status: 'pending',
@@ -512,7 +509,6 @@ export function LeavePage() {
         to_date: '',
         reason: '',
         half_day: false,
-        contact_number: '',
         half_day_period: ''
       });
       setSelectedLeaveType(null);
@@ -1036,18 +1032,7 @@ export function LeavePage() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Contact Number (During Leave)
-                </label>
-                <input
-                  type="tel"
-                  value={formData.contact_number}
-                  onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
-                  placeholder="Optional"
-                  className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                />
-              </div>
+
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">

@@ -355,7 +355,7 @@ export function LeavePage() {
           )
         `)
         .eq('employees.organization_id', organization.id)
-        .order('applied_date', { ascending: false });
+        .order('applied_at', { ascending: false });
 
       if (error) throw error;
       setAllRequests(data || []);

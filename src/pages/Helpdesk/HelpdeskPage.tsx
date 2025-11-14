@@ -207,7 +207,7 @@ export function HelpdeskPage() {
 
   useEffect(() => {
     // Trigger KB search when subject or description changes
-    const searchText = `${newTicketForm.subject} ${newTicketForm.description}`.trim();
+    const searchText = (newTicketForm.subject + ' ' + newTicketForm.description).trim();
     const timeoutId = setTimeout(() => {
       searchKBArticles(searchText);
     }, 500); // Debounce for 500ms
@@ -232,10 +232,7 @@ export function HelpdeskPage() {
       // Load staff members (admin, hr roles)
       const { data: staffData } = await supabase
         .from('employees')
-        .select(`
-          id, first_name, last_name, employee_code, department_id,
-          user_roles!inner(role)
-        `)
+        .select('id, first_name, last_name, employee_code, department_id, user_roles!inner(role)')
         .eq('organization_id', organization.id)
         .in('user_roles.role', ['owner', 'admin', 'hr'])
         .in('employment_status', ['active', 'probation']);
@@ -268,7 +265,7 @@ export function HelpdeskPage() {
         .from('kb_articles')
         .select('id, title, category, description, views')
         .eq('organization_id', organization.id)
-        .or(`title.ilike.%${search}%,description.ilike.%${search}%,content.ilike.%${search}%`)
+        .or('title.ilike.%' + search + '%,description.ilike.%' + search + '%,content.ilike.%' + search + '%')
         .order('views', { ascending: false })
         .limit(5);
 
@@ -290,13 +287,7 @@ export function HelpdeskPage() {
     try {
       const { data, error } = await supabase
         .from('kb_articles')
-        .select(`
-          *,
-          author:created_by (
-            first_name,
-            last_name
-          )
-        `)
+        .select('*, author:created_by(first_name, last_name)')
         .eq('id', articleId)
         .single();
 
@@ -323,20 +314,7 @@ export function HelpdeskPage() {
       
       let query = supabase
         .from('support_tickets')
-        .select(`
-          *,
-          employees:employee_id (
-            first_name,
-            last_name,
-            employee_code,
-            department_id,
-            departments (name)
-          ),
-          assigned_employee:assigned_to (
-            first_name,
-            last_name
-          )
-        `);
+        .select('*, employees:employee_id(first_name, last_name, employee_code, department_id, departments(name)), assigned_employee:assigned_to(first_name, last_name)');
 
       // If admin, load all tickets, else just employee's tickets
       if (isAdmin) {
@@ -414,27 +392,6 @@ export function HelpdeskPage() {
       openVsClosed: { open, closed }
     });
   };
-          assigned_employee:assigned_to (
-            first_name,
-            last_name
-          )
-        `)
-        .eq('employee_id', membership.employee_id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setTickets(data || []);
-    } catch (error: any) {
-      console.error('Error loading tickets:', error);
-      setAlertModal({
-        type: 'error',
-        title: 'Error',
-        message: 'Failed to load tickets'
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -447,18 +404,20 @@ export function HelpdeskPage() {
       const { data: ticketNumberData } = await supabase
         .rpc('generate_ticket_number');
 
-      const ticketNumber = ticketNumberData || `TKT-${Date.now()}`;
+      const ticketNumber = ticketNumberData || 'TKT-' + Date.now();
 
       // Calculate SLA due date based on priority
-      const slaHours = {
+      const slaHoursMap: { [key: string]: number } = {
         low: 120,
         medium: 72,
         high: 24,
         critical: 8
-      }[newTicketForm.priority] || 72;
+      };
 
+      const slaHours = slaHoursMap[newTicketForm.priority] || 72;
       const slaDueDate = new Date();
       slaDueDate.setHours(slaDueDate.getHours() + slaHours);
+
 
       // Create ticket
       const { data: ticket, error: ticketError } = await supabase
@@ -491,7 +450,7 @@ export function HelpdeskPage() {
       if (attachments.length > 0) {
         for (const file of attachments) {
           const fileExt = file.name.split('.').pop();
-          const fileName = `${ticket.id}/${Date.now()}.${fileExt}`;
+          const fileName = ticket.id + '/' + Date.now() + '.' + fileExt;
           
           const { error: uploadError } = await supabase.storage
             .from('ticket-attachments')
@@ -504,7 +463,7 @@ export function HelpdeskPage() {
 
             await supabase.from('ticket_attachments').insert({
               ticket_id: ticket.id,
-              employee_id: membership.employee_id,
+              uploaded_by: membership.employee_id,
               file_name: file.name,
               file_url: urlData.publicUrl,
               file_size: file.size,
@@ -517,7 +476,7 @@ export function HelpdeskPage() {
       setAlertModal({
         type: 'success',
         title: 'Ticket Created',
-        message: `Your support ticket ${ticketNumber} has been created successfully.`
+        message: 'Your support ticket ' + (ticketNumber || '') + ' has been created successfully.'
       });
 
       setShowNewTicketModal(false);
@@ -546,14 +505,7 @@ export function HelpdeskPage() {
       // Load comments (include internal notes for admins)
       let commentsQuery = supabase
         .from('ticket_comments')
-        .select(`
-          *,
-          employees (
-            first_name,
-            last_name,
-            employee_code
-          )
-        `)
+        .select('*, employees(first_name, last_name, employee_code)')
         .eq('ticket_id', ticketId);
 
       // Non-admins can only see public comments
@@ -685,8 +637,8 @@ export function HelpdeskPage() {
         ticket_id: selectedTicket.id,
         employee_id: membership.employee_id,
         activity_type: 'assigned',
-        new_value: `${assignedStaff?.first_name} ${assignedStaff?.last_name}`,
-        description: `Ticket assigned to ${assignedStaff?.first_name} ${assignedStaff?.last_name}`
+        new_value: (assignedStaff?.first_name || '') + ' ' + (assignedStaff?.last_name || ''),
+        description: 'Ticket assigned to ' + (assignedStaff?.first_name || '') + ' ' + (assignedStaff?.last_name || '')
       });
 
       setAlertModal({
@@ -748,7 +700,7 @@ export function HelpdeskPage() {
         activity_type: 'status_changed',
         old_value: selectedTicket.status,
         new_value: newStatus,
-        description: `Status changed from ${selectedTicket.status} to ${newStatus}`
+        description: 'Status changed from ' + selectedTicket.status + ' to ' + newStatus
       });
 
       setAlertModal({
@@ -843,15 +795,15 @@ export function HelpdeskPage() {
           ticket_id: ticketId,
           employee_id: membership.employee_id,
           activity_type: 'assigned',
-          new_value: `${assignedStaff?.first_name} ${assignedStaff?.last_name}`,
-          description: `Bulk assigned to ${assignedStaff?.first_name} ${assignedStaff?.last_name}`
+          new_value: (assignedStaff?.first_name || '') + ' ' + (assignedStaff?.last_name || ''),
+          description: 'Bulk assigned to ' + (assignedStaff?.first_name || '') + ' ' + (assignedStaff?.last_name || '')
         });
       }
 
       setAlertModal({
         type: 'success',
         title: 'Bulk Assignment Complete',
-        message: `${selectedTicketIds.length} tickets have been assigned.`
+        message: selectedTicketIds.length + ' tickets have been assigned.'
       });
 
       setSelectedTicketIds([]);
@@ -896,7 +848,7 @@ export function HelpdeskPage() {
       setAlertModal({
         type: 'success',
         title: 'Bulk Close Complete',
-        message: `${selectedTicketIds.length} tickets have been closed.`
+        message: selectedTicketIds.length + ' tickets have been closed.'
       });
 
       setSelectedTicketIds([]);
@@ -919,9 +871,9 @@ export function HelpdeskPage() {
       'Category': t.category,
       'Priority': t.priority,
       'Status': t.status,
-      'Employee': `${t.employees.first_name} ${t.employees.last_name}`,
+      'Employee': (t.employees.first_name || '') + ' ' + (t.employees.last_name || ''),
       'Department': t.employees.departments?.name || 'N/A',
-      'Assigned To': t.assigned_employee ? `${t.assigned_employee.first_name} ${t.assigned_employee.last_name}` : 'Unassigned',
+      'Assigned To': t.assigned_employee ? (t.assigned_employee.first_name || '') + ' ' + (t.assigned_employee.last_name || '') : 'Unassigned',
       'Created': new Date(t.created_at).toLocaleDateString(),
       'Overdue': t.is_overdue ? 'Yes' : 'No'
     }));
@@ -929,14 +881,14 @@ export function HelpdeskPage() {
     const headers = Object.keys(csvData[0] || {});
     const csv = [
       headers.join(','),
-      ...csvData.map(row => headers.map(h => `"${row[h as keyof typeof row]}"`).join(','))
+      ...csvData.map(row => headers.map(h => '"' + row[h as keyof typeof row] + '"').join(','))
     ].join('\n');
 
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `helpdesk-tickets-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = 'helpdesk-tickets-' + new Date().toISOString().split('T')[0] + '.csv';
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -1017,9 +969,9 @@ export function HelpdeskPage() {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffMins < 60) return diffMins + 'm ago';
+    if (diffHours < 24) return diffHours + 'h ago';
+    if (diffDays < 7) return diffDays + 'd ago';
     return date.toLocaleDateString();
   };
 
@@ -1034,7 +986,7 @@ export function HelpdeskPage() {
 
   const getCategoryLabel = (category: string) => {
     const cat = CATEGORIES.find(c => c.value === category);
-    return cat ? `${cat.icon} ${cat.label}` : category;
+    return cat ? cat.icon + ' ' + cat.label : category;
   };
 
   if (loading) {
@@ -1081,22 +1033,22 @@ export function HelpdeskPage() {
       <div className="bg-white rounded-xl shadow-md border border-slate-200 p-1 flex gap-1 w-fit">
         <button
           onClick={() => setViewMode('list')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
+          className={'flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ' + (
             viewMode === 'list'
               ? 'bg-gradient-to-r from-pink-600 to-pink-700 text-white shadow-md'
               : 'text-slate-600 hover:bg-slate-50'
-          }`}
+          )}
         >
           <List className="h-5 w-5" />
           Ticket List
         </button>
         <button
           onClick={() => setViewMode('calendar')}
-          className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
+          className={'flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ' + (
             viewMode === 'calendar'
               ? 'bg-gradient-to-r from-pink-600 to-pink-700 text-white shadow-md'
               : 'text-slate-600 hover:bg-slate-50'
-          }`}
+          )}
         >
           <Calendar className="h-5 w-5" />
           Calendar & SLA
@@ -1207,7 +1159,7 @@ export function HelpdeskPage() {
               </div>
               <p className="text-2xl font-bold text-orange-600">{analytics.byCategory.length}</p>
               <p className="text-xs text-slate-500 mt-1">
-                {analytics.byCategory.slice(0, 2).map(c => `${c.category}: ${c.count}`).join(', ')}
+                {analytics.byCategory.slice(0, 2).map(c => c.category + ': ' + c.count).join(', ')}
               </p>
             </div>
           </div>
@@ -1470,12 +1422,12 @@ export function HelpdeskPage() {
                         <span className="text-sm">{getCategoryLabel(ticket.category)}</span>
                       </td>
                       <td className="px-6 py-4 cursor-pointer" onClick={() => openTicketDetail(ticket)}>
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${priorityBadge.color}`}>
+                        <span className={'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ' + priorityBadge.color}>
                           {priorityBadge.label}
                         </span>
                       </td>
                       <td className="px-6 py-4 cursor-pointer" onClick={() => openTicketDetail(ticket)}>
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${getStatusConfig(ticket.status).color}`}>
+                        <span className={'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ' + getStatusConfig(ticket.status).color}>
                           <StatusIcon className="h-3.5 w-3.5" />
                           {getStatusConfig(ticket.status).label}
                         </span>
@@ -1535,11 +1487,11 @@ export function HelpdeskPage() {
                       key={cat.value}
                       type="button"
                       onClick={() => setNewTicketForm({ ...newTicketForm, category: cat.value })}
-                      className={`p-4 border-2 rounded-xl text-left transition-all ${
+                      className={'p-4 border-2 rounded-xl text-left transition-all ' + (
                         newTicketForm.category === cat.value
                           ? 'border-pink-500 bg-pink-50'
                           : 'border-slate-200 hover:border-slate-300'
-                      }`}
+                      )}
                     >
                       <div className="text-2xl mb-1">{cat.icon}</div>
                       <div className="text-sm font-medium text-slate-900">{cat.label}</div>
@@ -1559,11 +1511,11 @@ export function HelpdeskPage() {
                       key={priority.value}
                       type="button"
                       onClick={() => setNewTicketForm({ ...newTicketForm, priority: priority.value })}
-                      className={`px-4 py-3 border-2 rounded-xl text-sm font-medium transition-all ${
+                      className={'px-4 py-3 border-2 rounded-xl text-sm font-medium transition-all ' + (
                         newTicketForm.priority === priority.value
                           ? priority.color.replace('bg-', 'bg-') + ' border-current'
                           : 'border-slate-200 hover:border-slate-300 text-slate-700'
-                      }`}
+                      )}
                     >
                       {priority.label}
                     </button>
@@ -1755,14 +1707,14 @@ export function HelpdeskPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Status</p>
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${getStatusConfig(selectedTicket.status).color}`}>
+                  <span className={'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ' + getStatusConfig(selectedTicket.status).color}>
                     {React.createElement(getStatusConfig(selectedTicket.status).icon, { className: "h-3.5 w-3.5" })}
                     {getStatusConfig(selectedTicket.status).label}
                   </span>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Priority</p>
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${getPriorityBadge(selectedTicket.priority).color}`}>
+                  <span className={'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ' + getPriorityBadge(selectedTicket.priority).color}>
                     {getPriorityBadge(selectedTicket.priority).label}
                   </span>
                 </div>
@@ -1844,9 +1796,9 @@ export function HelpdeskPage() {
                 </h3>
                 <div className="space-y-4 mb-4">
                   {comments.map((comment) => (
-                    <div key={comment.id} className={`rounded-xl p-4 ${comment.is_internal ? 'bg-yellow-50 border-2 border-yellow-200' : 'bg-slate-50'}`}>
+                    <div key={comment.id} className={'rounded-xl p-4 ' + (comment.is_internal ? 'bg-yellow-50 border-2 border-yellow-200' : 'bg-slate-50')}>
                       <div className="flex items-start gap-3">
-                        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${comment.is_internal ? 'bg-yellow-200' : 'bg-pink-100'}`}>
+                        <div className={'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ' + (comment.is_internal ? 'bg-yellow-200' : 'bg-pink-100')}>
                           {comment.is_internal ? <Lock className="h-4 w-4 text-yellow-700" /> : <User className="h-4 w-4 text-pink-600" />}
                         </div>
                         <div className="flex-1">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { ScopeProvider } from './contexts/ScopeContext';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './components/Auth/LoginPage';
 import { RegisterPage } from './components/Auth/RegisterPage';
@@ -135,7 +136,9 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppContent />
+        <ScopeProvider>
+          <AppContent />
+        </ScopeProvider>
       </AuthProvider>
     </ThemeProvider>
   );

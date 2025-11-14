@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { CheckSquare, Plus, X, Send, Clock, Calendar, User, GitBranch, Github, TrendingUp, Filter, Search, Sparkles, AlertCircle, CheckCircle, Timer, MessageSquare, Paperclip } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useScope } from '../../contexts/ScopeContext';
+import { ScopeBar } from '../../components/Scope/ScopeBar';
 
 interface Task {
   id: string;
@@ -23,6 +25,7 @@ interface Task {
     first_name: string;
     last_name: string;
     employee_code: string;
+    department_id?: string;
   };
 }
 
@@ -68,8 +71,8 @@ interface AlertModal {
 
 export function TasksPage() {
   const { membership, organization } = useAuth();
+  const { selectedDepartmentId, selectedEmployeeId, employeesInSelectedDept } = useScope();
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const [githubStats, setGithubStats] = useState<GitHubStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -77,7 +80,6 @@ export function TasksPage() {
   const [alertModal, setAlertModal] = useState<AlertModal | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<TaskFormData>({
     title: '',
@@ -92,7 +94,7 @@ export function TasksPage() {
     github_pr_number: ''
   });
 
-  const isAdmin = membership?.role && ['admin', 'hr', 'manager'].includes(membership.role);
+  const isAdmin = membership?.role && ['owner','admin', 'hr', 'manager'].includes(membership.role);
 
   useEffect(() => {
     loadData();
@@ -102,7 +104,6 @@ export function TasksPage() {
     try {
       await Promise.all([
         loadTasks(),
-        isAdmin && loadEmployees(),
         isAdmin && loadGithubStats()
       ]);
     } catch (error) {
@@ -118,7 +119,7 @@ export function TasksPage() {
         .from('tasks')
         .select(`
           *,
-          assigned_employee:employees!assigned_to(id, first_name, last_name, employee_code)
+          assigned_employee:employees!assigned_to(id, first_name, last_name, employee_code, department_id)
         `)
         .eq('organization_id', organization?.id)
         .order('created_at', { ascending: false });
@@ -260,8 +261,11 @@ export function TasksPage() {
       filtered = filtered.filter(t => t.status === filterStatus);
     }
 
-    if (selectedEmployee) {
-      filtered = filtered.filter(t => t.assigned_employee?.id === selectedEmployee);
+    // Apply scope filters: employee first, then department
+    if (selectedEmployeeId) {
+      filtered = filtered.filter(t => t.assigned_employee?.id === selectedEmployeeId);
+    } else if (selectedDepartmentId) {
+      filtered = filtered.filter(t => t.assigned_employee?.department_id === selectedDepartmentId);
     }
 
     if (searchQuery) {
@@ -457,7 +461,7 @@ export function TasksPage() {
                     className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500"
                   >
                     <option value="">Select Employee</option>
-                    {employees.map(emp => (
+                    {employeesInSelectedDept.map(emp => (
                       <option key={emp.id} value={emp.id}>
                         {emp.first_name} {emp.last_name} ({emp.employee_code})
                       </option>
@@ -553,6 +557,7 @@ export function TasksPage() {
         </div>
       )}
 
+      <ScopeBar />
       <div className="space-y-6 animate-fadeIn">
         <div className="flex items-center justify-between">
           <div>
@@ -621,20 +626,7 @@ export function TasksPage() {
               <option value="completed">Completed</option>
             </select>
 
-            {isAdmin && (
-              <select
-                value={selectedEmployee || ''}
-                onChange={(e) => setSelectedEmployee(e.target.value || null)}
-                className="px-4 py-2 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500"
-              >
-                <option value="">All Employees</option>
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.first_name} {emp.last_name}
-                  </option>
-                ))}
-              </select>
-            )}
+            {/* Per-page employee filter removed; use ScopeBar instead */}
           </div>
 
           {filteredTasks.length === 0 ? (

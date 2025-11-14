@@ -122,11 +122,23 @@ const STATUS_CONFIG = {
 };
 
 export function HelpdeskPage() {
-  const { membership, organization } = useAuth();
+  const { membership, organization, user } = useAuth();
   const isAdmin = membership?.role && ['owner', 'admin', 'hr'].includes(membership.role);
+  
+  console.log('🎫 HelpdeskPage rendered', {
+    hasUser: !!user,
+    userId: user?.id,
+    userEmail: user?.email,
+    hasMembership: !!membership,
+    membershipRole: membership?.role,
+    isAdmin,
+    hasOrg: !!organization,
+    orgId: organization?.id
+  });
   
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [showNewTicketModal, setShowNewTicketModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
@@ -196,14 +208,114 @@ export function HelpdeskPage() {
   const [newComment, setNewComment] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
 
+  // Load employee_id from user_id or email
   useEffect(() => {
-    if (membership?.employee_id && organization?.id) {
-      loadTickets();
-      if (isAdmin) {
-        loadAdminData();
+    const loadEmployeeId = async () => {
+      console.log('👤 Attempting to load employee_id...', { 
+        hasUser: !!user, 
+        userId: user?.id, 
+        userEmail: user?.email,
+        hasOrg: !!organization, 
+        orgId: organization?.id 
+      });
+      
+      if (!user?.id || !organization?.id) {
+        console.warn('⚠️ Cannot load employee_id - missing user or organization');
+        return;
       }
+      
+      try {
+        // First, try to find employee by user_id
+        let { data, error } = await supabase
+          .from('employees')
+          .select('id, user_id')
+          .eq('user_id', user.id)
+          .eq('organization_id', organization.id)
+          .maybeSingle();
+        
+        if (error) {
+          console.error('❌ Error loading employee_id by user_id:', error);
+        }
+        
+        // If not found by user_id, try to find by company_email and auto-link
+        if (!data && user.email) {
+          console.log('🔍 Employee not found by user_id, searching by company_email:', user.email);
+          const { data: employeeByEmail, error: emailError } = await supabase
+            .from('employees')
+            .select('id, user_id, company_email')
+            .eq('organization_id', organization.id)
+            .eq('company_email', user.email)
+            .maybeSingle();
+          
+          if (emailError) {
+            console.error('❌ Error loading employee by email:', emailError);
+            console.error('Error details:', { message: emailError.message, details: emailError.details, hint: emailError.hint });
+            // Don't throw, just log and continue
+          }
+          
+          if (employeeByEmail && !employeeByEmail.user_id) {
+            console.log('🔗 Found unlinked employee, auto-linking to user_id:', user.id);
+            // Auto-link the employee to this user
+            const { error: updateError } = await supabase
+              .from('employees')
+              .update({ user_id: user.id })
+              .eq('id', employeeByEmail.id);
+            
+            if (updateError) {
+              console.error('❌ Error auto-linking employee:', updateError);
+            } else {
+              console.log('✅ Successfully auto-linked employee:', employeeByEmail.id);
+              data = { id: employeeByEmail.id, user_id: user.id };
+            }
+          } else if (employeeByEmail && employeeByEmail.user_id) {
+            console.log('✅ Found already-linked employee:', employeeByEmail.id);
+            data = { id: employeeByEmail.id, user_id: employeeByEmail.user_id };
+          }
+        }
+        
+        if (data) {
+          console.log('✅ Loaded employee_id:', data.id);
+          setEmployeeId(data.id);
+        } else {
+          console.warn('⚠️ No employee record found for user:', user.id, 'email:', user.email);
+        }
+      } catch (error) {
+        console.error('❌ Exception loading employee_id:', error);
+      }
+    };
+    
+    loadEmployeeId();
+  }, [user, organization]);
+
+  useEffect(() => {
+    console.log('🔄 Helpdesk useEffect triggered', { 
+      hasMembership: !!membership, 
+      hasEmployeeId: !!employeeId,
+      hasOrganization: !!organization,
+      hasOrgId: !!organization?.id,
+      isAdmin,
+      userEmail: user?.email
+    });
+    
+    // Admins can view helpdesk without employee_id (for ticket management)
+    // Regular employees need employee_id to create their own tickets
+    if (organization?.id) {
+      if (isAdmin) {
+        console.log('👑 Loading helpdesk for admin/owner');
+        loadTickets();
+        loadAdminData();
+      } else if (employeeId) {
+        console.log('👤 Loading helpdesk for employee');
+        loadTickets();
+      } else {
+        console.warn('⚠️ Employee waiting for employee_id to be loaded');
+        // Don't set loading to false yet, employeeId is still being loaded
+      }
+    } else {
+      console.warn('⚠️ Missing organization for helpdesk');
+      setLoading(false);
     }
-  }, [membership, organization, isAdmin]);
+  }, [employeeId, organization, isAdmin, user]);
 
   useEffect(() => {
     // Trigger KB search when subject or description changes
@@ -220,33 +332,58 @@ export function HelpdeskPage() {
 
     try {
       // Load all employees
-      const { data: empData } = await supabase
+      const { data: empData, error: empError } = await supabase
         .from('employees')
         .select('id, first_name, last_name, employee_code, department_id')
         .eq('organization_id', organization.id)
         .in('employment_status', ['active', 'probation'])
         .order('first_name');
 
-      setEmployees(empData || []);
+      if (empError) {
+        console.error('Error loading employees:', empError);
+      } else {
+        setEmployees(empData || []);
+      }
 
-      // Load staff members (admin, hr roles)
-      const { data: staffData } = await supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code, department_id, user_roles!inner(role)')
+      // Load staff members (get user_ids of admin/hr roles, then get their employees)
+      const { data: adminUsers, error: adminError } = await supabase
+        .from('organization_members')
+        .select('user_id')
         .eq('organization_id', organization.id)
-        .in('user_roles.role', ['owner', 'admin', 'hr'])
-        .in('employment_status', ['active', 'probation']);
+        .in('role', ['owner', 'admin', 'hr'])
+        .eq('is_active', true);
 
-      setStaffMembers(staffData || []);
+      if (adminError) {
+        console.error('Error loading admin users:', adminError);
+      } else if (adminUsers && adminUsers.length > 0) {
+        const userIds = adminUsers.map(u => u.user_id);
+        
+        const { data: staffData, error: staffError } = await supabase
+          .from('employees')
+          .select('id, first_name, last_name, employee_code, department_id, user_id')
+          .eq('organization_id', organization.id)
+          .in('user_id', userIds)
+          .in('employment_status', ['active', 'probation']);
+        
+        if (staffError) {
+          console.error('Error loading staff members:', staffError);
+        } else {
+          setStaffMembers(staffData || []);
+        }
+      }
 
       // Load departments
-      const { data: deptData } = await supabase
+      const { data: deptData, error: deptError } = await supabase
         .from('departments')
         .select('id, name')
         .eq('organization_id', organization.id)
         .order('name');
 
-      setDepartments(deptData || []);
+      if (deptError) {
+        console.error('Error loading departments:', deptError);
+      } else {
+        setDepartments(deptData || []);
+      }
     } catch (error) {
       console.error('Error loading admin data:', error);
     }
@@ -307,39 +444,52 @@ export function HelpdeskPage() {
   };
 
   const loadTickets = async () => {
-    if (!membership?.employee_id || !organization?.id) return;
+    // Admins can view without employee_id, regular users need it
+    if (!organization?.id || (!isAdmin && !employeeId)) return;
 
     try {
+      console.log('🎫 Loading helpdesk tickets...', { isAdmin, orgId: organization.id, empId: employeeId });
       setLoading(true);
       
       let query = supabase
         .from('support_tickets')
-        .select('*, employees:employee_id(first_name, last_name, employee_code, department_id, departments(name)), assigned_employee:assigned_to(first_name, last_name)');
+        .select('*, employees:employee_id(first_name, last_name, employee_code, department_id, departments:department_id(name)), assigned_employee:assigned_to(first_name, last_name)');
 
       // If admin, load all tickets, else just employee's tickets
       if (isAdmin) {
         query = query.eq('organization_id', organization.id);
       } else {
-        query = query.eq('employee_id', membership.employee_id);
+        query = query.eq('employee_id', employeeId);
       }
 
       const { data, error } = await query.order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Database error loading tickets:', error);
+        throw error;
+      }
+      console.log('✅ Helpdesk tickets loaded:', data?.length || 0);
       setTickets(data || []);
       
       if (isAdmin) {
         calculateAnalytics(data || []);
       }
     } catch (error: any) {
-      console.error('Error loading tickets:', error);
+      console.error('❌ Error loading helpdesk tickets:', error);
+      console.error('Error details:', { 
+        message: error.message, 
+        code: error.code, 
+        details: error.details, 
+        hint: error.hint 
+      });
       setAlertModal({
         type: 'error',
         title: 'Error',
-        message: 'Failed to load tickets'
+        message: error.message || 'Failed to load tickets'
       });
     } finally {
       setLoading(false);
+      console.log('🏁 Helpdesk loading complete');
     }
   };
 
@@ -395,7 +545,7 @@ export function HelpdeskPage() {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!membership?.employee_id || !organization?.id) return;
+    if (!employeeId || !organization?.id) return;
 
     try {
       setSubmitting(true);
@@ -774,7 +924,7 @@ export function HelpdeskPage() {
   };
 
   const handleBulkAssign = async (staffId: string) => {
-    if (!membership?.employee_id || selectedTicketIds.length === 0) return;
+    if (!employeeId || selectedTicketIds.length === 0) return;
 
     try {
       const { error } = await supabase
@@ -820,7 +970,7 @@ export function HelpdeskPage() {
   };
 
   const handleBulkClose = async () => {
-    if (!membership?.employee_id || selectedTicketIds.length === 0) return;
+    if (!employeeId || selectedTicketIds.length === 0) return;
 
     try {
       const { error } = await supabase
@@ -1019,15 +1169,56 @@ export function HelpdeskPage() {
               Export CSV
             </button>
           )}
-          <button 
-            onClick={() => setShowNewTicketModal(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-pink-600 to-pink-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all"
-          >
-            <Plus className="h-5 w-5" />
-            New Ticket
-          </button>
+          {/* New Ticket button - only for employees, not owners/admins */}
+          {!isAdmin && employeeId && (
+            <button 
+              onClick={() => setShowNewTicketModal(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-pink-600 to-pink-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all"
+              title="Create a new support ticket"
+            >
+              <Plus className="h-5 w-5" />
+              New Ticket
+            </button>
+          )}
+          {/* Show message if employee doesn't have employee record */}
+          {!isAdmin && !employeeId && (
+            <div className="px-4 py-2 bg-yellow-50 border-2 border-yellow-300 rounded-xl text-sm text-yellow-800">
+              <AlertCircle className="inline h-4 w-4 mr-2" />
+              Your employee profile is not set up yet. Contact your administrator.
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Info banner for admins */}
+      {isAdmin && (
+        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-blue-900">Owner/Admin Management View</p>
+              <p className="text-sm text-blue-700 mt-1">
+                You can view and manage all support tickets raised by employees. Employees create tickets from their portal.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Info/error banner for employees without employee record */}
+      {!isAdmin && !employeeId && (
+        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-900">Employee Profile Not Found</p>
+              <p className="text-sm text-red-700 mt-1">
+                Your employee profile is not linked to your account. Please contact your administrator to create your employee record and link it to your user account (User ID: {user?.id?.substring(0, 8)}...).
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View Mode Tabs */}
       <div className="bg-white rounded-xl shadow-md border border-slate-200 p-1 flex gap-1 w-fit">

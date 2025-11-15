@@ -60,6 +60,7 @@ export function OwnerPayrollPage() {
   const [selectedCycle, setSelectedCycle] = useState<PayrollCycle | null>(null);
   const [payslips, setPayslips] = useState<Payslip[]>([]);
   const [components, setComponents] = useState<SalaryComponent[]>([]);
+  const [activeEmployeeCount, setActiveEmployeeCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showComponentModal, setShowComponentModal] = useState(false);
@@ -78,6 +79,7 @@ export function OwnerPayrollPage() {
     if (organization?.id) {
       loadCycles();
       loadComponents();
+      loadActiveEmployeeCount();
     }
   }, [organization]);
 
@@ -154,6 +156,22 @@ export function OwnerPayrollPage() {
       setComponents(data || []);
     } catch (error) {
       console.error('Error loading components:', error);
+    }
+  };
+
+  const loadActiveEmployeeCount = async () => {
+    if (!organization?.id) return;
+    try {
+      const { count, error } = await supabase
+        .from('employees')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organization.id)
+        .eq('employment_status', 'active');
+
+      if (error) throw error;
+      setActiveEmployeeCount(count || 0);
+    } catch (error) {
+      console.error('Error loading employee count:', error);
     }
   };
 
@@ -350,7 +368,7 @@ ${payslip.payment_date ? `Paid on: ${new Date(payslip.payment_date).toLocaleDate
             <span className="text-sm text-slate-500">Employees</span>
             <Users className="h-5 w-5 text-emerald-500" />
           </div>
-          <p className="text-2xl font-bold text-slate-900">{payslips.length}</p>
+          <p className="text-2xl font-bold text-slate-900">{activeEmployeeCount}</p>
         </div>
         <div className="bg-white rounded-xl p-6 border border-slate-200">
           <div className="flex items-center justify-between mb-2">

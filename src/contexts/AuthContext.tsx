@@ -314,6 +314,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log('=== SIGNUP START ===');
     console.log('Email:', email);
     console.log('Organization:', organizationName);
+    // Global email uniqueness check before attempting signup
+    try {
+      const { assertEmailAvailableOrThrow } = await import('../lib/email');
+      await assertEmailAvailableOrThrow(email);
+    } catch (err: any) {
+      console.error('Global email uniqueness failed:', err);
+      throw new Error(err?.message || 'This email is already in use.');
+    }
 
     // Store organization name in localStorage for immediate backup
     localStorage.setItem('pendingOrganizationName', organizationName);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Save, User, Briefcase, DollarSign, FileText, Mail, Send, CheckCircle, AlertCircle, Key } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { assertEmailAvailableOrThrow } from '../../lib/email';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface AddEmployeeModalProps {
@@ -118,6 +119,9 @@ export function AddEmployeeModal({ onClose, onSuccess, departments, designations
     setLoading(true);
 
     try {
+      // Global email uniqueness pre-check (server-side RPC)
+      await assertEmailAvailableOrThrow(formData.company_email);
+
       // Build payload ensuring optional dates are null, not empty strings
       const payload: any = {
         first_name: formData.first_name.trim(),

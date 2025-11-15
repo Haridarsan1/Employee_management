@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface ExpenseClaim {
   id: string;
@@ -56,6 +57,10 @@ interface Department {
 interface ExpenseCategory {
   id: string;
   name: string;
+  description?: string | null;
+  requires_receipt?: boolean;
+  max_amount?: number | null;
+  is_active?: boolean;
 }
 
 export function OwnerExpensesPage() {
@@ -78,6 +83,15 @@ export function OwnerExpensesPage() {
     dateFrom: '',
     dateTo: ''
   });
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
+  const [categoryForm, setCategoryForm] = useState({
+    name: '',
+    description: '',
+    requires_receipt: true as boolean,
+    max_amount: '' as string | number,
+    is_active: true as boolean
+  });
 
   useEffect(() => {
     if (organization?.id) {
@@ -86,6 +100,36 @@ export function OwnerExpensesPage() {
       loadCategories();
     }
   }, [organization]);
+
+  // Realtime sync for categories
+  useEffect(() => {
+    if (!organization?.id) return;
+    let channel: RealtimeChannel | null = null;
+    try {
+      channel = supabase
+        .channel(`expense_categories_${organization.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'expense_categories',
+            filter: `organization_id=eq.${organization.id}`
+          },
+          () => {
+            loadCategories();
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.error('Failed to subscribe to category changes', e);
+    }
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [organization?.id]);
 
   const loadClaims = async () => {
     if (!organization?.id) return;
@@ -144,15 +188,95 @@ export function OwnerExpensesPage() {
     try {
       const { data, error } = await supabase
         .from('expense_categories')
-        .select('id, name')
+        .select('id, name, description, requires_receipt, max_amount, is_active')
         .eq('organization_id', organization.id)
-        .eq('is_active', true)
         .order('name');
 
       if (error) throw error;
       setCategories(data || []);
     } catch (error) {
       console.error('Error loading categories:', error);
+    }
+  };
+
+  const resetCategoryForm = () => {
+    setEditingCategory(null);
+    setCategoryForm({ name: '', description: '', requires_receipt: true, max_amount: '', is_active: true });
+  };
+
+  const openAddCategory = () => {
+    resetCategoryForm();
+    setShowCategoryModal(true);
+  };
+
+  const openEditCategory = (cat: ExpenseCategory) => {
+    setEditingCategory(cat);
+    setCategoryForm({
+      name: cat.name,
+      description: (cat.description as any) || '',
+      requires_receipt: !!cat.requires_receipt,
+      max_amount: cat.max_amount ?? '',
+      is_active: cat.is_active ?? true
+    });
+    setShowCategoryModal(true);
+  };
+
+  const saveCategory = async () => {
+    if (!organization?.id || !categoryForm.name.trim()) return;
+    const payload: any = {
+      organization_id: organization.id,
+      name: categoryForm.name.trim(),
+      description: categoryForm.description?.trim() || null,
+      requires_receipt: !!categoryForm.requires_receipt,
+      max_amount: categoryForm.max_amount === '' ? null : Number(categoryForm.max_amount),
+      is_active: !!categoryForm.is_active
+    };
+
+    try {
+      if (editingCategory) {
+        const { error } = await supabase
+          .from('expense_categories')
+          .update(payload)
+          .eq('id', editingCategory.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('expense_categories')
+          .insert(payload);
+        if (error) throw error;
+      }
+      setShowCategoryModal(false);
+      resetCategoryForm();
+      loadCategories();
+    } catch (e: any) {
+      alert(e.message || 'Failed to save category');
+    }
+  };
+
+  const deleteCategory = async (cat: ExpenseCategory) => {
+    if (!confirm(`Delete category "${cat.name}"?`)) return;
+    try {
+      const { error } = await supabase
+        .from('expense_categories')
+        .delete()
+        .eq('id', cat.id);
+      if (error) throw error;
+      loadCategories();
+    } catch (e: any) {
+      alert(e.message || 'Failed to delete category');
+    }
+  };
+
+  const toggleActive = async (cat: ExpenseCategory) => {
+    try {
+      const { error } = await supabase
+        .from('expense_categories')
+        .update({ is_active: !cat.is_active })
+        .eq('id', cat.id);
+      if (error) throw error;
+      loadCategories();
+    } catch (e: any) {
+      alert(e.message || 'Failed to update');
     }
   };
 
@@ -569,6 +693,135 @@ export function OwnerExpensesPage() {
           )}
         </div>
       </div>
+
+      {/* Manage Categories */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Filter className="h-5 w-5 text-slate-400" />
+            <h3 className="font-semibold text-slate-900">Manage Categories</h3>
+          </div>
+          <button
+            onClick={openAddCategory}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Add Category
+          </button>
+        </div>
+        {categories.length === 0 ? (
+          <div className="p-4 border border-amber-200 bg-amber-50 rounded-lg text-amber-800">
+            No categories yet. Click "Add Category" to create defaults for your organization.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500">
+                  <th className="py-2 pr-4">Name</th>
+                  <th className="py-2 pr-4">Description</th>
+                  <th className="py-2 pr-4">Requires Receipt</th>
+                  <th className="py-2 pr-4">Max Amount</th>
+                  <th className="py-2 pr-4">Active</th>
+                  <th className="py-2 pr-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categories.map(cat => (
+                  <tr key={cat.id} className="border-t border-slate-200">
+                    <td className="py-2 pr-4 font-medium text-slate-900">{cat.name}</td>
+                    <td className="py-2 pr-4 text-slate-600">{cat.description || '-'}</td>
+                    <td className="py-2 pr-4">{cat.requires_receipt ? 'Yes' : 'No'}</td>
+                    <td className="py-2 pr-4">{cat.max_amount != null ? `₹${Number(cat.max_amount).toFixed(2)}` : '-'}</td>
+                    <td className="py-2 pr-4">{cat.is_active ? 'Yes' : 'No'}</td>
+                    <td className="py-2 pr-4 flex gap-2">
+                      <button onClick={() => toggleActive(cat)} className="text-emerald-600 hover:underline">
+                        {cat.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button onClick={() => openEditCategory(cat)} className="text-blue-600 hover:underline">Edit</button>
+                      <button onClick={() => deleteCategory(cat)} className="text-red-600 hover:underline">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showCategoryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full">
+            <div className="border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-slate-900">{editingCategory ? 'Edit Category' : 'Add Category'}</h2>
+              <button onClick={() => { setShowCategoryModal(false); resetCategoryForm(); }} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Name *</label>
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={categoryForm.description}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={categoryForm.requires_receipt}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, requires_receipt: e.target.checked })}
+                  />
+                  <span className="text-sm text-slate-700">Requires Receipt</span>
+                </label>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Max Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={categoryForm.max_amount}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, max_amount: e.target.value })}
+                    placeholder="Optional"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={categoryForm.is_active}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, is_active: e.target.checked })}
+                />
+                <span className="text-sm text-slate-700">Active</span>
+              </label>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => { setShowCategoryModal(false); resetCategoryForm(); }}
+                  className="flex-1 px-4 py-2 text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveCategory}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  {editingCategory ? 'Save Changes' : 'Create Category'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View Claim Modal */}
       {showViewModal && selectedClaim && (

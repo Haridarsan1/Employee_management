@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface ExpenseClaim {
   id: string;
@@ -75,6 +76,36 @@ export function EmployeeExpensesPage() {
       loadCategories();
     }
   }, [employee, organization]);
+
+  // Realtime sync for categories
+  useEffect(() => {
+    if (!organization?.id) return;
+    let channel: RealtimeChannel | null = null;
+    try {
+      channel = supabase
+        .channel(`expense_categories_${organization.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'expense_categories',
+            filter: `organization_id=eq.${organization.id}`
+          },
+          () => {
+            loadCategories();
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.error('Failed to subscribe to category changes', e);
+    }
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [organization?.id]);
 
   const loadClaims = async () => {
     if (!employee?.id) return;
@@ -585,12 +616,19 @@ Generated on: ${new Date().toLocaleString()}
                   <h3 className="text-lg font-semibold text-slate-900">Expense Items</h3>
                   <button
                     onClick={addExpenseItem}
-                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+                    disabled={categories.length === 0}
+                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1 disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" />
                     Add Item
                   </button>
                 </div>
+
+                {categories.length === 0 && (
+                  <div className="mb-4 p-4 border border-amber-200 bg-amber-50 rounded-lg text-amber-800">
+                    No expense categories are configured for your organization yet. Please ask an Owner/Admin to add categories in Manage Categories.
+                  </div>
+                )}
 
                 <div className="space-y-4">
                   {createForm.items.map((item, index) => (
@@ -614,6 +652,7 @@ Generated on: ${new Date().toLocaleString()}
                           <select
                             value={item.category_id}
                             onChange={(e) => updateExpenseItem(index, 'category_id', e.target.value)}
+                            disabled={categories.length === 0}
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
                             <option value="">Select category</option>
@@ -706,10 +745,10 @@ Generated on: ${new Date().toLocaleString()}
                   </button>
                   <button
                     onClick={handleCreateClaim}
-                    disabled={loading}
+                    disabled={loading || categories.length === 0}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
-                    {loading ? 'Creating...' : 'Create Claim'}
+                    {categories.length === 0 ? 'No categories available' : (loading ? 'Creating...' : 'Create Claim')}
                   </button>
                 </div>
               </div>

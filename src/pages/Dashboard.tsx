@@ -12,6 +12,8 @@ import { Users, Clock, Calendar, TrendingUp, Activity, Target, Briefcase } from 
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AttendanceManageModal } from '../components/Attendance/AttendanceManageModal';
+import { SetupModal } from '../components/Settings/SetupModal';
+import { useSetupStatus } from '../lib/useSetupStatus';
 
 export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void } = {}) {
   const { organization, membership } = useAuth();
@@ -32,6 +34,13 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
   // Employee check-in/check-out state
   const [todayAttendanceRecord, setTodayAttendanceRecord] = useState<any>(null);
   const [checkInLoading, setCheckInLoading] = useState(false);
+
+  // Setup modal state
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const { setupStatus, refreshSetupStatus } = useSetupStatus(organization?.id);
+
+  // Check if user is owner - only owners should see the setup modal
+  const isOwner = membership?.role === 'owner';
 
   useEffect(() => {
     if (!organization?.id) return;
@@ -119,6 +128,49 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
       }
     );
 
+    // Subscribe to master data changes to refresh setup status
+    channel.on(
+      'postgres_changes',
+      { 
+        event: '*', 
+        schema: 'public', 
+        table: 'departments', 
+        filter: `organization_id=eq.${organization.id}` 
+      },
+      () => {
+        console.log('Department change detected, refreshing setup status');
+        refreshSetupStatus();
+      }
+    );
+
+    channel.on(
+      'postgres_changes',
+      { 
+        event: '*', 
+        schema: 'public', 
+        table: 'designations', 
+        filter: `organization_id=eq.${organization.id}` 
+      },
+      () => {
+        console.log('Designation change detected, refreshing setup status');
+        refreshSetupStatus();
+      }
+    );
+
+    channel.on(
+      'postgres_changes',
+      { 
+        event: '*', 
+        schema: 'public', 
+        table: 'branches', 
+        filter: `organization_id=eq.${organization.id}` 
+      },
+      () => {
+        console.log('Branch change detected, refreshing setup status');
+        refreshSetupStatus();
+      }
+    );
+
     channel.subscribe((status) => {
       console.log('Dashboard real-time status:', status);
       if (status === 'SUBSCRIBED') {
@@ -129,8 +181,20 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
     return () => {
       console.log('Cleaning up dashboard subscriptions');
       supabase.removeChannel(channel);
+
     };
   }, [organization?.id]); // Only re-subscribe when organization changes
+
+  // Effect to show setup modal for owners when setup is incomplete
+  useEffect(() => {
+    if (!setupStatus.loading && isOwner && !setupStatus.isComplete) {
+      // Show modal after a brief delay to avoid jarring UX
+      const timer = setTimeout(() => {
+        setShowSetupModal(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [setupStatus.loading, setupStatus.isComplete, isOwner]);
 
   const loadDashboardData = async () => {
     try {
@@ -595,10 +659,6 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
               );
             })}
           </div>
-          {/* Attendance management modal for owner/admin */}
-          {showAttendanceModal && (
-            <AttendanceManageModal open={showAttendanceModal} onClose={() => setShowAttendanceModal(false)} />
-          )}
         </div>
       </div>
 
@@ -660,6 +720,30 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: string) => void 
           </div>
         </div>
       </div>
+
+      {/* Setup Modal for Owners */}
+      {isOwner && (
+        <SetupModal
+          open={showSetupModal}
+          onClose={() => setShowSetupModal(false)}
+          onNavigateToSettings={() => {
+            setShowSetupModal(false);
+            if (onNavigate) {
+              onNavigate('settings');
+            }
+          }}
+          setupStatus={{
+            hasDepartments: setupStatus.hasDepartments,
+            hasDesignations: setupStatus.hasDesignations,
+            hasBranches: setupStatus.hasBranches,
+          }}
+        />
+      )}
+
+      {/* Attendance Modal for Owner/Admin */}
+      {(membership?.role === 'owner' || membership?.role === 'admin') && (
+        <AttendanceManageModal open={showAttendanceModal} onClose={() => setShowAttendanceModal(false)} />
+      )}
     </div>
   );
 }

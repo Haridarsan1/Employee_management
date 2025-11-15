@@ -1,7 +1,8 @@
 -- Fix Helpdesk Migration
 -- Run this in Supabase SQL Editor
 
--- Enable UUID extension
+-- Enable UUID/generator extensions (prefer pgcrypto's gen_random_uuid())
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Drop existing tables if needed and recreate with proper structure
@@ -35,7 +36,7 @@ END $$;
 
 -- Support Tickets Table
 CREATE TABLE support_tickets (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
   ticket_number text UNIQUE NOT NULL,
   employee_id uuid REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
@@ -60,7 +61,7 @@ CREATE TABLE support_tickets (
 
 -- Ticket Comments Table
 CREATE TABLE ticket_comments (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ticket_id uuid REFERENCES support_tickets(id) ON DELETE CASCADE NOT NULL,
   employee_id uuid REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
   comment text NOT NULL,
@@ -70,7 +71,7 @@ CREATE TABLE ticket_comments (
 
 -- Ticket Attachments Table
 CREATE TABLE ticket_attachments (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ticket_id uuid REFERENCES support_tickets(id) ON DELETE CASCADE NOT NULL,
   uploaded_by uuid REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
   file_name text NOT NULL,
@@ -82,7 +83,7 @@ CREATE TABLE ticket_attachments (
 
 -- Ticket Activities Table
 CREATE TABLE ticket_activities (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ticket_id uuid REFERENCES support_tickets(id) ON DELETE CASCADE NOT NULL,
   employee_id uuid REFERENCES employees(id) ON DELETE CASCADE NOT NULL,
   activity_type text NOT NULL,
@@ -94,7 +95,7 @@ CREATE TABLE ticket_activities (
 
 -- Knowledge Base Articles Table
 CREATE TABLE kb_articles (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
   title text NOT NULL,
   category text NOT NULL,
@@ -108,7 +109,7 @@ CREATE TABLE kb_articles (
 
 -- SLA Policies Table
 CREATE TABLE sla_policies (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE NOT NULL,
   priority ticket_priority NOT NULL,
   response_time_hours integer NOT NULL,
@@ -271,17 +272,17 @@ USING (
 
 -- Insert default SLA policies
 INSERT INTO sla_policies (organization_id, priority, response_time_hours, resolution_time_hours)
-SELECT DISTINCT organization_id, 'low', 48, 168 FROM organizations
+SELECT DISTINCT id, 'low'::ticket_priority, 48, 168 FROM organizations
 ON CONFLICT (organization_id, priority) DO NOTHING;
 
 INSERT INTO sla_policies (organization_id, priority, response_time_hours, resolution_time_hours)
-SELECT DISTINCT organization_id, 'medium', 24, 72 FROM organizations
+SELECT DISTINCT id, 'medium'::ticket_priority, 24, 72 FROM organizations
 ON CONFLICT (organization_id, priority) DO NOTHING;
 
 INSERT INTO sla_policies (organization_id, priority, response_time_hours, resolution_time_hours)
-SELECT DISTINCT organization_id, 'high', 4, 24 FROM organizations
+SELECT DISTINCT id, 'high'::ticket_priority, 4, 24 FROM organizations
 ON CONFLICT (organization_id, priority) DO NOTHING;
 
 INSERT INTO sla_policies (organization_id, priority, response_time_hours, resolution_time_hours)
-SELECT DISTINCT organization_id, 'critical', 1, 8 FROM organizations
+SELECT DISTINCT id, 'critical'::ticket_priority, 1, 8 FROM organizations
 ON CONFLICT (organization_id, priority) DO NOTHING;

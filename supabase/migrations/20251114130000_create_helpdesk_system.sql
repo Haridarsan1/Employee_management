@@ -160,13 +160,31 @@ CREATE INDEX IF NOT EXISTS idx_ticket_comments_ticket ON ticket_comments(ticket_
 CREATE INDEX IF NOT EXISTS idx_ticket_comments_employee ON ticket_comments(employee_id);
 
 CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket ON ticket_attachments(ticket_id);
-CREATE INDEX IF NOT EXISTS idx_ticket_attachments_comment ON ticket_attachments(comment_id);
+-- Create comment_id index only if the column exists (for idempotency across schemas)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ticket_attachments' AND column_name = 'comment_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_ticket_attachments_comment ON ticket_attachments(comment_id);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_ticket_activities_ticket ON ticket_activities(ticket_id);
 
 CREATE INDEX IF NOT EXISTS idx_kb_articles_org ON kb_articles(organization_id);
 CREATE INDEX IF NOT EXISTS idx_kb_articles_category ON kb_articles(category);
-CREATE INDEX IF NOT EXISTS idx_kb_articles_published ON kb_articles(is_published);
+-- Only create the published index if the column exists
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'kb_articles' AND column_name = 'is_published'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_kb_articles_published ON kb_articles(is_published);
+  END IF;
+END $$;
 
 -- Function to generate unique ticket numbers
 CREATE OR REPLACE FUNCTION generate_ticket_number()
@@ -210,6 +228,20 @@ BEGIN
     NEW.is_overdue := false;
   END IF;
   
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Generic helper to bump updated_at on row updates (used by multiple tables)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_ARGV[0] IS NULL THEN
+    NEW.updated_at := now();
+  ELSE
+    -- Optional: support passing a column name; default is updated_at
+    EXECUTE format('SELECT now()::timestamptz') INTO NEW."%I" USING TG_ARGV[0];
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -268,15 +300,15 @@ CREATE POLICY "Employees can view own tickets"
   );
 
 -- Owners/Admins/HR can view all tickets in their organization
+DROP POLICY IF EXISTS "Owners and staff can view all tickets" ON support_tickets;
 CREATE POLICY "Owners and staff can view all tickets"
   ON support_tickets FOR SELECT
   USING (
     EXISTS (
-      SELECT 1 FROM employees e
-      JOIN user_roles ur ON ur.user_id = e.user_id
-      WHERE e.user_id = auth.uid()
-        AND e.organization_id = support_tickets.organization_id
-        AND ur.role IN ('owner', 'admin', 'hr')
+      SELECT 1 FROM organization_members om
+      WHERE om.user_id = auth.uid()
+        AND om.organization_id = support_tickets.organization_id
+        AND om.role IN ('owner', 'admin', 'hr')
     )
   );
 
@@ -318,21 +350,22 @@ CREATE POLICY "Employees can update own tickets"
   );
 
 -- Owners/Admins/HR can update all tickets
+DROP POLICY IF EXISTS "Staff can update all tickets" ON support_tickets;
 CREATE POLICY "Staff can update all tickets"
   ON support_tickets FOR UPDATE
   USING (
     EXISTS (
-      SELECT 1 FROM employees e
-      JOIN user_roles ur ON ur.user_id = e.user_id
-      WHERE e.user_id = auth.uid()
-        AND e.organization_id = support_tickets.organization_id
-        AND ur.role IN ('owner', 'admin', 'hr')
+      SELECT 1 FROM organization_members om
+      WHERE om.user_id = auth.uid()
+        AND om.organization_id = support_tickets.organization_id
+        AND om.role IN ('owner', 'admin', 'hr')
     )
   );
 
 -- RLS Policies for ticket_comments
 
 -- Users can view comments on tickets they can access
+DROP POLICY IF EXISTS "Users can view comments on accessible tickets" ON ticket_comments;
 CREATE POLICY "Users can view comments on accessible tickets"
   ON ticket_comments FOR SELECT
   USING (
@@ -341,25 +374,24 @@ CREATE POLICY "Users can view comments on accessible tickets"
       WHERE employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR assigned_to IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR EXISTS (
-           SELECT 1 FROM employees e
-           JOIN user_roles ur ON ur.user_id = e.user_id
-           WHERE e.user_id = auth.uid()
-             AND e.organization_id = (SELECT organization_id FROM support_tickets WHERE id = ticket_comments.ticket_id)
-             AND ur.role IN ('owner', 'admin', 'hr')
+           SELECT 1 FROM organization_members om
+           WHERE om.user_id = auth.uid()
+             AND om.organization_id = (SELECT organization_id FROM support_tickets WHERE id = ticket_comments.ticket_id)
+             AND om.role IN ('owner', 'admin', 'hr')
          )
     )
     AND (
       is_internal = false
       OR EXISTS (
-        SELECT 1 FROM employees e
-        JOIN user_roles ur ON ur.user_id = e.user_id
-        WHERE e.user_id = auth.uid()
-          AND ur.role IN ('owner', 'admin', 'hr')
+        SELECT 1 FROM organization_members om
+        WHERE om.user_id = auth.uid()
+          AND om.role IN ('owner', 'admin', 'hr')
       )
     )
   );
 
 -- Users can add comments to accessible tickets
+DROP POLICY IF EXISTS "Users can add comments" ON ticket_comments;
 CREATE POLICY "Users can add comments"
   ON ticket_comments FOR INSERT
   WITH CHECK (
@@ -369,16 +401,16 @@ CREATE POLICY "Users can add comments"
       WHERE employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR assigned_to IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR EXISTS (
-           SELECT 1 FROM employees e
-           JOIN user_roles ur ON ur.user_id = e.user_id
-           WHERE e.user_id = auth.uid()
-             AND e.organization_id = support_tickets.organization_id
-             AND ur.role IN ('owner', 'admin', 'hr')
+           SELECT 1 FROM organization_members om
+           WHERE om.user_id = auth.uid()
+             AND om.organization_id = support_tickets.organization_id
+             AND om.role IN ('owner', 'admin', 'hr')
          )
     )
   );
 
 -- RLS Policies for ticket_attachments
+DROP POLICY IF EXISTS "Users can view attachments on accessible tickets" ON ticket_attachments;
 CREATE POLICY "Users can view attachments on accessible tickets"
   ON ticket_attachments FOR SELECT
   USING (
@@ -387,22 +419,52 @@ CREATE POLICY "Users can view attachments on accessible tickets"
       WHERE employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR assigned_to IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR EXISTS (
-           SELECT 1 FROM employees e
-           JOIN user_roles ur ON ur.user_id = e.user_id
-           WHERE e.user_id = auth.uid()
-             AND e.organization_id = (SELECT organization_id FROM support_tickets WHERE id = ticket_attachments.ticket_id)
-             AND ur.role IN ('owner', 'admin', 'hr')
+           SELECT 1 FROM organization_members om
+           WHERE om.user_id = auth.uid()
+             AND om.organization_id = (SELECT organization_id FROM support_tickets WHERE id = ticket_attachments.ticket_id)
+             AND om.role IN ('owner', 'admin', 'hr')
          )
     )
   );
 
-CREATE POLICY "Users can add attachments"
-  ON ticket_attachments FOR INSERT
-  WITH CHECK (
-    employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
-  );
+DROP POLICY IF EXISTS "Users can add attachments" ON ticket_attachments;
+DO $$
+BEGIN
+  -- If legacy column employee_id exists, use it; otherwise use uploaded_by
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ticket_attachments' AND column_name = 'employee_id'
+  ) THEN
+    CREATE POLICY "Users can add attachments"
+      ON ticket_attachments FOR INSERT
+      WITH CHECK (
+        employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
+      );
+  ELSIF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ticket_attachments' AND column_name = 'uploaded_by'
+  ) THEN
+    CREATE POLICY "Users can add attachments"
+      ON ticket_attachments FOR INSERT
+      WITH CHECK (
+        uploaded_by IN (SELECT id FROM employees WHERE user_id = auth.uid())
+      );
+  ELSE
+    -- Fallback: allow insert if the user can access the ticket; tighten later if schema stabilizes
+    CREATE POLICY "Users can add attachments"
+      ON ticket_attachments FOR INSERT
+      WITH CHECK (
+        ticket_id IN (
+          SELECT id FROM support_tickets
+          WHERE employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
+             OR assigned_to IN (SELECT id FROM employees WHERE user_id = auth.uid())
+        )
+      );
+  END IF;
+END $$;
 
 -- RLS Policies for ticket_activities
+DROP POLICY IF EXISTS "Users can view activities on accessible tickets" ON ticket_activities;
 CREATE POLICY "Users can view activities on accessible tickets"
   ON ticket_activities FOR SELECT
   USING (
@@ -411,11 +473,10 @@ CREATE POLICY "Users can view activities on accessible tickets"
       WHERE employee_id IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR assigned_to IN (SELECT id FROM employees WHERE user_id = auth.uid())
          OR EXISTS (
-           SELECT 1 FROM employees e
-           JOIN user_roles ur ON ur.user_id = e.user_id
-           WHERE e.user_id = auth.uid()
-             AND e.organization_id = (SELECT organization_id FROM support_tickets WHERE id = ticket_activities.ticket_id)
-             AND ur.role IN ('owner', 'admin', 'hr')
+           SELECT 1 FROM organization_members om
+           WHERE om.user_id = auth.uid()
+             AND om.organization_id = (SELECT organization_id FROM support_tickets WHERE id = ticket_activities.ticket_id)
+             AND om.role IN ('owner', 'admin', 'hr')
          )
     )
   );
@@ -427,39 +488,58 @@ CREATE POLICY "System can insert activities"
 -- RLS Policies for kb_articles
 
 -- Published articles visible to all employees in organization
-CREATE POLICY "Employees can view published articles"
-  ON kb_articles FOR SELECT
-  USING (
-    is_published = true
-    AND organization_id IN (
-      SELECT organization_id FROM employees
-      WHERE user_id = auth.uid()
-    )
-  );
+DROP POLICY IF EXISTS "Employees can view published articles" ON kb_articles;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'kb_articles' AND column_name = 'is_published'
+  ) THEN
+    CREATE POLICY "Employees can view published articles"
+      ON kb_articles FOR SELECT
+      USING (
+        is_published = true
+        AND organization_id IN (
+          SELECT organization_id FROM employees
+          WHERE user_id = auth.uid()
+        )
+      );
+  ELSE
+    -- Fallback when column is not present: allow viewing by organization membership
+    CREATE POLICY "Employees can view published articles"
+      ON kb_articles FOR SELECT
+      USING (
+        organization_id IN (
+          SELECT organization_id FROM employees
+          WHERE user_id = auth.uid()
+        )
+      );
+  END IF;
+END $$;
 
 -- Staff can manage articles
+DROP POLICY IF EXISTS "Staff can manage articles" ON kb_articles;
 CREATE POLICY "Staff can manage articles"
   ON kb_articles FOR ALL
   USING (
     EXISTS (
-      SELECT 1 FROM employees e
-      JOIN user_roles ur ON ur.user_id = e.user_id
-      WHERE e.user_id = auth.uid()
-        AND e.organization_id = kb_articles.organization_id
-        AND ur.role IN ('owner', 'admin', 'hr')
+      SELECT 1 FROM organization_members om
+      WHERE om.user_id = auth.uid()
+        AND om.organization_id = kb_articles.organization_id
+        AND om.role IN ('owner', 'admin', 'hr')
     )
   );
 
 -- RLS Policies for sla_policies
+DROP POLICY IF EXISTS "Staff can manage SLA policies" ON sla_policies;
 CREATE POLICY "Staff can manage SLA policies"
   ON sla_policies FOR ALL
   USING (
     EXISTS (
-      SELECT 1 FROM employees e
-      JOIN user_roles ur ON ur.user_id = e.user_id
-      WHERE e.user_id = auth.uid()
-        AND e.organization_id = sla_policies.organization_id
-        AND ur.role IN ('owner', 'admin')
+      SELECT 1 FROM organization_members om
+      WHERE om.user_id = auth.uid()
+        AND om.organization_id = sla_policies.organization_id
+        AND om.role IN ('owner', 'admin')
     )
   );
 

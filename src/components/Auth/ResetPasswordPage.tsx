@@ -104,6 +104,9 @@ export function ResetPasswordPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-8 py-10">
+            <div className="flex justify-center mb-6">
+              <img src="/favicon.png" alt="Loghr" className="h-16 w-16 rounded-2xl shadow-xl" />
+            </div>
             <h2 className="text-3xl font-bold text-white text-center">Set New Password</h2>
             <p className="text-blue-100 text-center mt-2">Choose a strong password for your account</p>
           </div>
@@ -236,7 +239,7 @@ export function ResetPasswordPage() {
         </div>
 
         <p className="text-center text-sm text-slate-600 mt-8">
-          India Compliant HRMS & Payroll System
+          India Compliant Employee Management System
         </p>
       </div>
     </div>

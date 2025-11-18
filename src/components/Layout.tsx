@@ -112,14 +112,12 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                 {sidebarOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
               </button>
               <div className="ml-4 flex items-center gap-2">
-                <div className="h-10 w-10 bg-gradient-to-br from-blue-600 to-violet-600 rounded-xl flex items-center justify-center shadow-lg">
-                  <Sparkles className="h-5 w-5 text-white" />
-                </div>
+                <img src="/favicon.png" alt="Loghr" className="h-10 w-10 rounded-xl shadow-lg" />
                 <div>
                   <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">
-                    {organization?.name || 'HRMS & Payroll'}
+                    {organization?.name || 'Loghr'}
                   </h1>
-                  <p className="text-xs text-slate-500">Human Resource Management</p>
+                  <p className="text-xs text-slate-500">Employee Management</p>
                 </div>
               </div>
             </div>

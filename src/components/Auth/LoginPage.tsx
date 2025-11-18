@@ -45,8 +45,11 @@ export function LoginPage({ onSwitchToRegister, onForgotPassword, onBackToLandin
                 Back to Home
               </button>
             )}
+            <div className="flex justify-center mb-6">
+              <img src="/favicon.png" alt="Loghr" className="h-16 w-16 rounded-2xl shadow-xl" />
+            </div>
             <h2 className="text-3xl font-bold text-white text-center">Welcome Back</h2>
-            <p className="text-blue-100 text-center mt-2">Sign in to your HRMS account</p>
+            <p className="text-blue-100 text-center mt-2">Sign in to your Loghr account</p>
           </div>
 
           <form onSubmit={handleSubmit} className="px-8 py-10 space-y-6">
@@ -139,7 +142,7 @@ export function LoginPage({ onSwitchToRegister, onForgotPassword, onBackToLandin
         </div>
 
         <p className="text-center text-sm text-slate-600 mt-8">
-          India Compliant HRMS & Payroll System
+          India Compliant Employee Management System
         </p>
       </div>
     </div>

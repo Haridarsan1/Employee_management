@@ -87,6 +87,9 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
       <div className="w-full max-w-lg">
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-8 py-10">
+            <div className="flex justify-center mb-6">
+              <img src="/favicon.png" alt="Loghr" className="h-16 w-16 rounded-2xl shadow-xl" />
+            </div>
             <h2 className="text-3xl font-bold text-white text-center">Start Your Free Trial</h2>
             <p className="text-blue-100 text-center mt-2">14-day trial, no credit card required</p>
           </div>

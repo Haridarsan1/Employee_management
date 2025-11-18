@@ -3,6 +3,7 @@ import { Menu, X, LogOut, Bell, User, LayoutDashboard, Users, Calendar, Clock, I
 import { useAuth } from '../contexts/AuthContext';
 import { canAccessPage } from '../lib/permissions';
 import { supabase } from '../lib/supabase';
+import { useNotifications } from '../contexts/NotificationsContext';
 
 interface LayoutProps {
   children: ReactNode;
@@ -12,8 +13,10 @@ interface LayoutProps {
 
 export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const { user, organization, membership, loading, signOut } = useAuth();
+  const { unread, unreadCount, markRead } = useNotifications();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeToday, setActiveToday] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
 
   useEffect(() => {
     const loadActiveToday = async () => {
@@ -121,12 +124,30 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <button className="relative p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all">
+            <div className="flex items-center gap-3 relative">
+              <button onClick={() => setNotifOpen(v=>!v)} className="relative p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all">
                 <Bell className="h-5 w-5" />
-                <span className="absolute top-1 right-1 h-2 w-2 bg-gradient-to-r from-red-500 to-pink-500 rounded-full animate-pulse"></span>
+                {unreadCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 text-[10px] leading-[18px] text-white bg-red-600 rounded-full text-center">{unreadCount}</span>}
               </button>
-
+              {notifOpen && (
+                <div className="absolute right-20 top-12 w-96 bg-white border rounded-xl shadow-xl z-50">
+                  <div className="p-3 border-b flex items-center justify-between">
+                    <div className="font-semibold">Notifications</div>
+                    <button className="text-sm text-blue-600 underline" onClick={()=>{ setNotifOpen(false); onNavigate('notifications'); }}>View all</button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {unread.length === 0 ? (
+                      <div className="p-4 text-sm text-slate-500">You're all caught up.</div>
+                    ) : unread.slice(0,10).map(n => (
+                      <button key={n.id} onClick={()=>markRead(n.id)} className="w-full text-left p-3 hover:bg-slate-50 border-b last:border-b-0">
+                        <div className="text-sm font-medium text-slate-900">{n.title}</div>
+                        {n.message && <div className="text-xs text-slate-600 line-clamp-2">{n.message}</div>}
+                        <div className="text-[10px] text-slate-500 mt-1">{new Date(n.created_at).toLocaleString()}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-3 border-l border-slate-200 pl-4">
                 <div className="text-right">
                   <p className="text-sm font-semibold text-slate-900">{user?.email}</p>

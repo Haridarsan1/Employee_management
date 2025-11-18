@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Calendar, Plus, X, Send, CheckCircle, AlertCircle, Clock, FileText, Check, XCircle, Sparkles, Info, AlertTriangle, TrendingUp, Users, Download, Filter, SortAsc } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { sendNotification } from '../../lib/notifications';
 import { useAuth } from '../../contexts/AuthContext';
 import { ScopeBar } from '../../components/Scope/ScopeBar';
 
@@ -518,6 +519,28 @@ export function LeavePage() {
         message: `Your leave application for ${days} day(s) has been submitted and is pending approval.`
       });
 
+      // Notify owners about new leave request
+      try {
+        const { data: owners } = await supabase
+          .from('organization_members')
+          .select('user_id')
+          .eq('organization_id', organization.id)
+          .eq('role', 'owner');
+        const ownerIds = (owners || []).map(o => (o as any).user_id).filter(Boolean);
+        for (const ownerId of ownerIds) {
+          await sendNotification({
+            organizationId: organization.id,
+            senderId: membership.user_id,
+            receiverId: ownerId,
+            title: 'New Leave Application',
+            message: `${days} day(s) leave requested` + (formData.reason ? `: ${formData.reason}` : ''),
+            type: 'leave',
+            priority: 'normal',
+            metadata: { employee_id: membership.employee_id, from_date: formData.from_date, to_date: formData.to_date }
+          });
+        }
+      } catch (e) { /* ignore notify failure */ }
+
       setShowApplyModal(false);
       setFormData({
         leave_type_id: '',
@@ -575,6 +598,28 @@ export function LeavePage() {
       if (app) {
         const year = new Date(app.from_date).getFullYear();
         await adjustLeaveBalance(app.employee_id, app.leave_type_id, year, { pending: -Number(app.total_days), used: Number(app.total_days) });
+
+        // Notify employee about approval
+        try {
+          const { data: mem } = await supabase
+            .from('organization_members')
+            .select('user_id')
+            .eq('organization_id', organization.id)
+            .eq('employee_id', app.employee_id)
+            .maybeSingle();
+          if (mem?.user_id) {
+            await sendNotification({
+              organizationId: organization.id,
+              senderId: membership.user_id,
+              receiverId: mem.user_id,
+              title: 'Leave Approved',
+              message: `Your leave request has been approved.`,
+              type: 'leave',
+              priority: 'normal',
+              metadata: { application_id: app.id }
+            });
+          }
+        } catch (e) { /* ignore notify failure */ }
       }
 
       setAlertModal({
@@ -631,6 +676,28 @@ export function LeavePage() {
       if (app) {
         const year = new Date(app.from_date).getFullYear();
         await adjustLeaveBalance(app.employee_id, app.leave_type_id, year, { pending: -Number(app.total_days) });
+
+        // Notify employee about rejection
+        try {
+          const { data: mem } = await supabase
+            .from('organization_members')
+            .select('user_id')
+            .eq('organization_id', organization.id)
+            .eq('employee_id', app.employee_id)
+            .maybeSingle();
+          if (mem?.user_id) {
+            await sendNotification({
+              organizationId: organization.id,
+              senderId: membership.user_id,
+              receiverId: mem.user_id,
+              title: 'Leave Rejected',
+              message: `Your leave request has been rejected.` + (reason ? ` Reason: ${reason}` : ''),
+              type: 'leave',
+              priority: 'normal',
+              metadata: { application_id: app.id }
+            });
+          }
+        } catch (e) { /* ignore notify failure */ }
       }
 
       setAlertModal({

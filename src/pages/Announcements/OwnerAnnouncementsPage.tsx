@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Calendar, Filter, Loader2, Megaphone, Pencil, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { sendNotification } from '../../lib/notifications';
 
 type Category = 'general' | 'holiday' | 'event' | 'hr_update' | 'alert';
 type Priority = 'low' | 'normal' | 'high';
@@ -193,9 +194,32 @@ export function OwnerAnnouncementsPage() {
         if (error) throw error;
         setAlert({ type: 'success', title: 'Updated', message: 'Announcement updated.' });
       } else {
-        const { error } = await supabase.from('announcements').insert(payload);
+        const { data: created, error } = await supabase.from('announcements').insert(payload).select('*').single();
         if (error) throw error;
         setAlert({ type: 'success', title: 'Created', message: 'Announcement created.' });
+
+        // If it's published now, broadcast notifications to org members (excluding sender)
+        if (payload.status === 'published' && (!payload.published_at || new Date(payload.published_at) <= new Date())) {
+          const { data: members } = await supabase
+            .from('organization_members')
+            .select('user_id')
+            .eq('organization_id', organization.id);
+          const receivers = (members || []).map(m => (m as any).user_id).filter((uid: string) => uid && uid !== membership?.user_id);
+          const message = (payload.content || '').replace(/<[^>]+>/g, ' ').slice(0, 200);
+          for (const uid of receivers) {
+            try {
+              await sendNotification({
+                organizationId: organization.id,
+                senderId: membership?.user_id || null,
+                receiverId: uid,
+                title: payload.title,
+                message,
+                type: 'announcement',
+                metadata: { announcement_id: created?.id },
+              });
+            } catch (e) { /* no-op: continue others */ }
+          }
+        }
       }
       setShowEditor(false);
       await loadAnnouncements();

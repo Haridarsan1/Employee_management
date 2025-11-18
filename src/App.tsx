@@ -25,6 +25,8 @@ import { KnowledgeBasePage } from './pages/Helpdesk/KnowledgeBasePage';
 import { PerformancePage } from './pages/Performance/PerformancePage';
 import { TrainingPage } from './pages/Training/TrainingPage';
 import { AnnouncementsPage } from './pages/Announcements/AnnouncementsPage';
+import { NotificationsProvider } from './contexts/NotificationsContext';
+import { NotificationsPage } from './pages/Notifications/NotificationsPage';
 import { GitHubPage } from './pages/GitHub/GitHubPage';
 
 function AppContent() {
@@ -115,6 +117,8 @@ function AppContent() {
         return <KnowledgeBasePage />;
       case 'announcements':
         return <AnnouncementsPage />;
+      case 'notifications':
+        return <NotificationsPage />;
       case 'reports':
         return <ReportsPage />;
       case 'github':
@@ -129,9 +133,11 @@ function AppContent() {
   };
 
   return (
-    <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
-      {renderPage()}
-    </Layout>
+    <NotificationsProvider>
+      <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
+        {renderPage()}
+      </Layout>
+    </NotificationsProvider>
   );
 }
 

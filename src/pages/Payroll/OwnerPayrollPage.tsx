@@ -126,8 +126,8 @@ export function OwnerPayrollPage() {
             last_name,
             employee_code,
             company_email,
-            departments (name),
-            designations (title)
+            departments:departments!employees_department_id_fkey (name),
+            designations:designations!employees_designation_id_fkey (title)
           )
         `)
         .eq('payroll_cycle_id', cycleId)

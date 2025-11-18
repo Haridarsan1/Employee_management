@@ -76,7 +76,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
       company: 'TechCorp India',
       image: 'RK',
       rating: 5,
-      text: 'PulseHR transformed our HR operations. The location-based attendance and automated payroll saved us countless hours every month.'
+      text: 'LogHR transformed our HR operations. The location-based attendance and automated payroll saved us countless hours every month.'
     },
     {
       name: 'Priya Sharma',
@@ -92,7 +92,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
       company: 'StartupHub',
       image: 'AP',
       rating: 5,
-      text: 'Scaled from 10 to 200+ employees seamlessly. PulseHR grew with us every step of the way.'
+      text: 'Scaled from 10 to 200+ employees seamlessly. LogHR grew with us every step of the way.'
     }
   ];
 
@@ -106,7 +106,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
                 <Zap className="h-6 w-6 text-white" />
               </div>
               <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">
-                PulseHR
+                LogHR
               </span>
             </div>
             <div className="hidden md:flex items-center gap-8">
@@ -301,7 +301,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
               Loved by HR Teams Everywhere
             </h2>
             <p className="text-xl text-blue-100">
-              See what our customers have to say about PulseHR
+              See what our customers have to say about LogHR
             </p>
           </div>
 
@@ -387,7 +387,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
             Ready to Transform Your HR Operations?
           </h2>
           <p className="text-xl text-slate-300 mb-8">
-            Join thousands of companies already using PulseHR to streamline their workforce management.
+            Join thousands of companies already using LogHR to streamline their workforce management.
           </p>
           <button
             onClick={onGetStarted}
@@ -408,7 +408,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
                 <div className="h-10 w-10 bg-gradient-to-br from-blue-600 to-violet-600 rounded-xl flex items-center justify-center">
                   <Zap className="h-6 w-6 text-white" />
                 </div>
-                <span className="text-xl font-bold text-white">PulseHR</span>
+                <span className="text-xl font-bold text-white">LogHR</span>
               </div>
               <p className="text-slate-400 text-sm">
                 The modern HRMS platform for forward-thinking companies.
@@ -434,7 +434,7 @@ export function LandingPage({ onGetStarted, onLogin }: LandingPageProps) {
             ))}
           </div>
           <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-slate-400 text-sm">© 2025 PulseHR. All rights reserved.</p>
+            <p className="text-slate-400 text-sm">© 2025 LogHR. All rights reserved.</p>
             <div className="flex gap-4">
               {[Globe, Shield, Sparkles].map((Icon, i) => (
                 <a key={i} href="#" className="h-10 w-10 bg-slate-800 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">

@@ -24,6 +24,14 @@ export type ExpenseStatus = 'pending' | 'approved' | 'rejected' | 'reimbursed';
 
 export type SubscriptionStatus = 'active' | 'trial' | 'cancelled' | 'expired';
 
+export type GoalStatus = 'active' | 'completed' | 'overdue' | 'cancelled';
+
+export type GoalType = 'okr' | 'kpi' | 'project' | 'personal' | 'team';
+
+export type ReviewStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+export type ReviewType = 'quarterly' | 'half_yearly' | 'annual' | 'probation' | 'performance_improvement';
+
 // Database table interfaces
 export interface Organization {
   id: string;
@@ -218,5 +226,53 @@ export interface AuditLog {
   record_id: string | null;
   old_values: any | null;
   new_values: any | null;
+  created_at: string;
+}
+
+export interface Goal {
+  id: string;
+  organization_id: string;
+  employee_id: string;
+  title: string;
+  description: string | null;
+  goal_type: GoalType;
+  status: GoalStatus;
+  progress: number;
+  target_value: number | null;
+  current_value: number | null;
+  unit: string | null;
+  start_date: string;
+  end_date: string;
+  completed_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PerformanceReview {
+  id: string;
+  organization_id: string;
+  employee_id: string;
+  reviewer_id: string;
+  review_type: ReviewType;
+  review_cycle: string;
+  rating: number | null;
+  feedback: string | null;
+  strengths: string | null;
+  areas_for_improvement: string | null;
+  goals_met: boolean | null;
+  status: ReviewStatus;
+  review_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalUpdate {
+  id: string;
+  goal_id: string;
+  updated_by: string;
+  progress: number;
+  notes: string | null;
   created_at: string;
 }

@@ -166,6 +166,11 @@ export function OwnerAnnouncementsPage() {
     }
     setLoading(true);
     try {
+      let computedPublishedAt = form.published_at ? new Date(form.published_at).toISOString() : null;
+      if (form.status === 'published' && !computedPublishedAt) {
+        computedPublishedAt = new Date().toISOString();
+      }
+
       const payload: any = {
         organization_id: organization.id,
         title: form.title.trim(),
@@ -173,7 +178,7 @@ export function OwnerAnnouncementsPage() {
         category: form.category,
         priority: form.priority,
         status: form.status,
-        published_at: form.published_at ? new Date(form.published_at).toISOString() : null,
+        published_at: computedPublishedAt,
         banner_image_url: form.banner_image_url || null,
         attachments: form.attachments || [],
         created_by: membership?.user_id || null,

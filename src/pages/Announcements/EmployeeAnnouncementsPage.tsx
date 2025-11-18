@@ -57,7 +57,7 @@ export function EmployeeAnnouncementsPage() {
         .select('*')
         .eq('organization_id', organization.id)
         .eq('status', 'published')
-        .lte('published_at', nowISO)
+        .or(`published_at.is.null,published_at.lte.${nowISO}`)
         .order('published_at', { ascending: false })
         .order('created_at', { ascending: false });
       if (error) throw error;

@@ -27,10 +27,11 @@ import { TrainingPage } from './pages/Training/TrainingPage';
 import { AnnouncementsPage } from './pages/Announcements/AnnouncementsPage';
 import { NotificationsProvider } from './contexts/NotificationsContext';
 import { NotificationsPage } from './pages/Notifications/NotificationsPage';
-import { GitHubPage } from './pages/GitHub/GitHubPage';
+import { EmployeeGitHubPage } from './pages/GitHub/EmployeeGitHubPage';
+import { OwnerGitHubPage } from './pages/GitHub/OwnerGitHubPage';
 
 function AppContent() {
-  const { user, loading, requirePasswordChange } = useAuth();
+  const { user, loading, requirePasswordChange, membership } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [authMode, setAuthMode] = useState<'landing' | 'login' | 'register' | 'employee-register' | 'forgot-password' | 'reset-password'>('landing');
 
@@ -122,7 +123,7 @@ function AppContent() {
       case 'reports':
         return <ReportsPage />;
       case 'github':
-        return <GitHubPage />;
+        return membership?.role === 'owner' ? <OwnerGitHubPage /> : <EmployeeGitHubPage />;
       case 'settings':
         return <SettingsPage />;
       case 'profile':

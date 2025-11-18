@@ -466,7 +466,7 @@ export function ReportsPage() {
     <>
       <ScopeBar />
       {alertModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-scaleIn">
             <div className={`p-6 rounded-t-2xl ${
               alertModal.type === 'success' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600' :

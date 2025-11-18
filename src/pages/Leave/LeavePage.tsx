@@ -171,7 +171,7 @@ export function LeavePage() {
   };
 
   const loadLeaveBalances = async () => {
-    if (!membership?.employee_id) return;
+    if (!membership?.employee_id || !organization?.id) return;
     try {
       const currentYear = new Date().getFullYear();
       const { data } = await supabase
@@ -181,6 +181,7 @@ export function LeavePage() {
           leave_types (*)
         `)
         .eq('employee_id', membership.employee_id)
+        .eq('organization_id', organization.id)
         .eq('year', currentYear);
       setLeaveBalances(data || []);
     } catch (error) {
@@ -189,7 +190,7 @@ export function LeavePage() {
   };
 
   const loadLeaveApplications = async () => {
-    if (!membership?.employee_id) return;
+    if (!membership?.employee_id || !organization?.id) return;
     try {
       const { data } = await supabase
         .from('leave_applications')
@@ -198,6 +199,7 @@ export function LeavePage() {
           leave_types (*)
         `)
         .eq('employee_id', membership.employee_id)
+        .eq('organization_id', organization.id)
         .order('applied_at', { ascending: false })
         .limit(20);
       setLeaveApplications(data || []);
@@ -214,8 +216,9 @@ export function LeavePage() {
         .select(`
           *,
           leave_types (*),
-          employees (first_name, last_name, employee_code)
+          employees!inner (first_name, last_name, employee_code, organization_id)
         `)
+        .eq('employees.organization_id', organization.id)
         .eq('status', 'pending')
         .order('applied_at', { ascending: false });
       setPendingApplications(data || []);
@@ -398,12 +401,13 @@ export function LeavePage() {
   };
 
   const hasOverlap = async (): Promise<string | null> => {
-    if (!membership?.employee_id) return null;
+    if (!membership?.employee_id || !organization?.id) return null;
     try {
       const { data, error } = await supabase
         .from('leave_applications')
-        .select('id, from_date, to_date, status')
+        .select('id, from_date, to_date, status, organization_id')
         .eq('employee_id', membership.employee_id)
+        .eq('organization_id', organization.id)
         .in('status', ['pending', 'approved'])
         .lte('from_date', formData.to_date)
         .gte('to_date', formData.from_date)
@@ -420,20 +424,30 @@ export function LeavePage() {
   };
 
   const adjustLeaveBalance = async (employeeId: string, leaveTypeId: string, year: number, deltas: { pending?: number; used?: number }) => {
+    if (!organization?.id) return;
     try {
       const { data: rows, error: selErr } = await supabase
         .from('leave_balances')
-        .select('id, total_quota, used_leaves, pending_leaves')
+        .select('id, total_quota, used_leaves, pending_leaves, organization_id')
         .eq('employee_id', employeeId)
         .eq('leave_type_id', leaveTypeId)
         .eq('year', year)
+        .eq('organization_id', organization.id)
         .limit(1);
       if (selErr) throw selErr;
 
       if (!rows || rows.length === 0) {
         const { error: insErr } = await supabase
           .from('leave_balances')
-          .insert({ employee_id: employeeId, leave_type_id: leaveTypeId, year, total_quota: 0, used_leaves: deltas.used || 0, pending_leaves: deltas.pending || 0 });
+          .insert({ 
+            employee_id: employeeId, 
+            leave_type_id: leaveTypeId, 
+            year, 
+            organization_id: organization.id,
+            total_quota: 0, 
+            used_leaves: deltas.used || 0, 
+            pending_leaves: deltas.pending || 0 
+          });
         if (insErr) throw insErr;
       } else {
         const current = rows[0];
@@ -444,7 +458,8 @@ export function LeavePage() {
           const { error: updErr } = await supabase
             .from('leave_balances')
             .update(payload)
-            .eq('id', current.id);
+            .eq('id', current.id)
+            .eq('organization_id', organization.id);
           if (updErr) throw updErr;
         }
       }
@@ -479,6 +494,7 @@ export function LeavePage() {
         .from('leave_applications')
         .insert({
           employee_id: membership.employee_id,
+          organization_id: organization.id,
           leave_type_id: formData.leave_type_id,
           from_date: formData.from_date,
           to_date: formData.to_date,
@@ -533,8 +549,9 @@ export function LeavePage() {
       // fetch application to know totals
       const { data: apps, error: appErr } = await supabase
         .from('leave_applications')
-        .select('id, employee_id, leave_type_id, total_days, from_date')
+        .select('id, employee_id, leave_type_id, total_days, from_date, organization_id')
         .eq('id', showApproveModal.id)
+        .eq('organization_id', organization.id)
         .limit(1);
       if (appErr) throw appErr;
 
@@ -548,7 +565,8 @@ export function LeavePage() {
       const { error } = await supabase
         .from('leave_applications')
         .update(update)
-        .eq('id', showApproveModal.id);
+        .eq('id', showApproveModal.id)
+        .eq('organization_id', organization.id);
 
       if (error) throw error;
 
@@ -589,8 +607,9 @@ export function LeavePage() {
       // fetch app
       const { data: apps, error: appErr } = await supabase
         .from('leave_applications')
-        .select('id, employee_id, leave_type_id, total_days, from_date')
+        .select('id, employee_id, leave_type_id, total_days, from_date, organization_id')
         .eq('id', applicationId)
+        .eq('organization_id', organization.id)
         .limit(1);
       if (appErr) throw appErr;
 
@@ -602,7 +621,8 @@ export function LeavePage() {
           approved_date: new Date().toISOString(),
           rejected_reason: reason
         })
-        .eq('id', applicationId);
+        .eq('id', applicationId)
+        .eq('organization_id', organization.id);
 
       if (error) throw error;
 
@@ -637,9 +657,10 @@ export function LeavePage() {
     try {
       const { data: apps, error: appErr } = await supabase
         .from('leave_applications')
-        .select('id, employee_id, leave_type_id, total_days, from_date, status')
+        .select('id, employee_id, leave_type_id, total_days, from_date, status, organization_id')
         .eq('id', applicationId)
         .eq('employee_id', membership?.employee_id || '')
+        .eq('organization_id', organization?.id || '')
         .limit(1);
       if (appErr) throw appErr;
 
@@ -648,7 +669,8 @@ export function LeavePage() {
         .update({ status: 'cancelled' })
         .eq('id', applicationId)
         .eq('status', 'pending')
-        .eq('employee_id', membership?.employee_id || '');
+        .eq('employee_id', membership?.employee_id || '')
+        .eq('organization_id', organization?.id || '');
 
       if (error) throw error;
 
@@ -710,7 +732,13 @@ export function LeavePage() {
       const rows: any[] = [];
       for (const [typeId, quota] of entries) {
         for (const empId of employeeIds) {
-          rows.push({ employee_id: empId, leave_type_id: typeId, year, total_quota: Number(quota) });
+          rows.push({ 
+            employee_id: empId, 
+            leave_type_id: typeId, 
+            year, 
+            total_quota: Number(quota),
+            organization_id: organization.id 
+          });
         }
       }
 
@@ -842,7 +870,7 @@ export function LeavePage() {
     <>
       <ScopeBar />
       {alertModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-scaleIn">
             <div className={`p-6 rounded-t-2xl ${
               alertModal.type === 'success' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600' :
